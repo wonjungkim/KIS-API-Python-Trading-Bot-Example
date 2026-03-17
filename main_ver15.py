@@ -43,6 +43,8 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+# httpx 로깅 레벨 수정(로그에 httpx 반복메세지 제거)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 def is_dst_active():
     est = pytz.timezone('US/Eastern')
