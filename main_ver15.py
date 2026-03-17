@@ -1,9 +1,3 @@
-#최초 개발자: 승승장군
-#V14.1 리버스모드 하이브리드 업데이트: V14 소진 시 자동 리버스 엔진 적용
-# [V14.2] 데이터 및 로그 디렉토리 분리 관리 및 버전 정보 누적 관리 기능 추가
-# [V16.0] 시스템 최적화: 30개 프리마켓 감시 스케줄러 단일화
-# [V16.1] 필수 진입점인 /record 명령어 부활
-
 import os
 import logging
 import datetime
@@ -18,7 +12,6 @@ from broker import KoreaInvestmentBroker
 from strategy import InfiniteStrategy
 from telegram_bot import TelegramController
 
-# [V14.2] 구동 시 data 및 logs 디렉토리 자동 생성 (휴먼 에러 방지)
 if not os.path.exists('data'):
     os.makedirs('data')
 if not os.path.exists('logs'):
@@ -33,7 +26,6 @@ APP_SECRET = os.getenv("APP_SECRET")
 CANO = os.getenv("CANO")
 ACNT_PRDT_CD = os.getenv("ACNT_PRDT_CD", "01")
 
-# [V14.2] 로그 설정 변경: 콘솔 출력뿐만 아니라 logs/ 폴더 하위에 날짜별 파일로 누적 저장
 log_filename = f"logs/bot_app_{datetime.datetime.now().strftime('%Y%m%d')}.log"
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
@@ -87,7 +79,6 @@ async def scheduled_force_reset(context):
     app_data['cfg'].reset_locks()
     await context.bot.send_message(chat_id=context.job.chat_id, text=f"🔓 <b>[{app_data.get('target_hour')}:00] 시스템 초기화 완료 (매매 잠금 해제)</b>", parse_mode='HTML')
 
-# 🚀 [V16.0] 메모리 최적화: 30개로 쪼개졌던 프리마켓 감시기를 1개의 스마트 반복 타이머로 통합
 async def scheduled_premarket_monitor(context):
     if not is_market_open(): return
     app_data = context.job.data
@@ -96,7 +87,6 @@ async def scheduled_premarket_monitor(context):
     now = datetime.datetime.now(kst)
     target_hour = app_data.get('target_hour', 18)
     
-    # 설정된 타겟 시간(17시 또는 18시) 정각부터 29분 사이의 프리마켓 시간대에만 작동하도록 방어
     if not (now.hour == target_hour and 0 <= now.minute < 30):
         return
 
@@ -158,9 +148,8 @@ async def scheduled_regular_trade(context):
                 cfg.set_lock(t, "REG")
                 msg += "\n🔒 <b>주문 전송 완료 (매매 잠금 설정됨)</b>"
                 
-                rev_state = cfg.get_reverse_state(t)
-                if rev_state["is_active"]:
-                    cfg.set_reverse_state(t, True, rev_state["day_count"] + 1)
+                # 🚀 [V16.16] 이곳에 있던 rev_day + 1 누적 로직은 삭제되었습니다.
+                # (이제 08:30 / record / sync 시점에서 멱등성 캘린더 엔진이 1회 누적을 완벽히 보장합니다.)
                     
             await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode='HTML')
 
@@ -208,7 +197,6 @@ def main():
     
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     
-    # 🔥 [V16.1] 긴급 부활한 record 명령어를 다시 라우터에 등록
     for cmd, handler in [("start", bot.cmd_start), ("record", bot.cmd_record), ("history", bot.cmd_history), ("sync", bot.cmd_sync), ("settlement", bot.cmd_settlement), ("seed", bot.cmd_seed), ("ticker", bot.cmd_ticker), ("mode", bot.cmd_mode), ("reset", bot.cmd_reset), ("version", bot.cmd_version)]:
         app.add_handler(CommandHandler(cmd, handler))
     app.add_handler(CallbackQueryHandler(bot.handle_callback))
@@ -227,7 +215,6 @@ def main():
         
         jq.run_daily(scheduled_force_reset, time=datetime.time(TARGET_HOUR, 0, tzinfo=kst), days=(0,1,2,3,4), chat_id=cfg.get_chat_id(), data=app_data)
         
-        # 🚀 [V16.0] 메모리 최적화: 프리마켓 감시 로직을 60초 간격 단 1개의 스마트 타이머로 교체!
         jq.run_repeating(scheduled_premarket_monitor, interval=60, chat_id=cfg.get_chat_id(), data=app_data)
             
         jq.run_daily(scheduled_regular_trade, time=datetime.time(TARGET_HOUR, 30, tzinfo=kst), days=(0,1,2,3,4), chat_id=cfg.get_chat_id(), data=app_data)

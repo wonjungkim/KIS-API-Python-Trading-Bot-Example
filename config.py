@@ -13,6 +13,10 @@ except ImportError:
         "V14.x [-] 버전 기록 파일(version_history.py)을 찾을 수 없습니다."
     ]
 
+# 🚀 [V16.16 업데이트 강제 주입]
+if "V16.16" not in str(VERSION_HISTORY):
+    VERSION_HISTORY.append("V16.16 [2026.03.18] 리버스 누적일 멱등성(Idempotent) 캘린더 엔진 도입 (08:30, sync, record 시 1일 1회 누적 보장) 및 Reset 메뉴 종목별 잠금해제/에스크로 완전 초기화 기능 적용 (수정: config, telegram_bot, telegram_view, dynamic_snowball_bot)")
+
 class ConfigManager:
     def __init__(self):
         self.FILES = {
@@ -196,14 +200,33 @@ class ConfigManager:
         
         return total_qty, avg_price, invested_up, sold_up
 
+    # 🚀 [V16.16] 리버스 상태에 last_update_date 캘린더 스탬프 추가
     def get_reverse_state(self, ticker):
         d = self._load_json(self.FILES["REVERSE_CFG"], {})
-        return d.get(ticker, {"is_active": False, "day_count": 0, "exit_target": 0.0})
+        return d.get(ticker, {"is_active": False, "day_count": 0, "exit_target": 0.0, "last_update_date": ""})
 
-    def set_reverse_state(self, ticker, is_active, day_count, exit_target=0.0):
+    def set_reverse_state(self, ticker, is_active, day_count, exit_target=0.0, last_update_date=None):
+        if last_update_date is None:
+            kst = pytz.timezone('Asia/Seoul')
+            last_update_date = datetime.datetime.now(kst).strftime('%Y-%m-%d')
+            
         d = self._load_json(self.FILES["REVERSE_CFG"], {})
-        d[ticker] = {"is_active": is_active, "day_count": day_count, "exit_target": exit_target}
+        d[ticker] = {"is_active": is_active, "day_count": day_count, "exit_target": exit_target, "last_update_date": last_update_date}
         self._save_json(self.FILES["REVERSE_CFG"], d)
+
+    # 🚀 [V16.16 핵심] 1일 1회만 누적되는 멱등성(Idempotent) 업데이트 함수
+    def update_reverse_day_if_needed(self, ticker):
+        state = self.get_reverse_state(ticker)
+        if state.get("is_active"):
+            kst = pytz.timezone('Asia/Seoul')
+            today_str = datetime.datetime.now(kst).strftime('%Y-%m-%d')
+            
+            # 오늘 날짜와 다르면 하루를 더하고 날짜 스탬프 갱신
+            if state.get("last_update_date") != today_str:
+                new_day = state.get("day_count", 0) + 1
+                self.set_reverse_state(ticker, True, new_day, state.get("exit_target", 0.0), today_str)
+                return True
+        return False
 
     def calculate_v14_state(self, ticker):
         ledger = self.get_ledger()
@@ -323,11 +346,9 @@ class ConfigManager:
     def get_version_history(self):
         return VERSION_HISTORY
 
-    # 🚀 [V16.15] 최신 버전 인식 로직 개선: 오름차순 정렬에 대응하여 리스트의 마지막 항목(-1)을 참조
     def get_latest_version(self):
         history = self.get_version_history()
         if history and len(history) > 0:
-            # 리스트 정렬 방식 변경에 따라 가장 마지막 항목을 최신으로 간주
             latest_entry = history[-1]
             if isinstance(latest_entry, str):
                 return latest_entry.split(' ')[0] 
@@ -352,6 +373,18 @@ class ConfigManager:
 
     def reset_locks(self):
         self._save_json(self.FILES["LOCKS"], {})
+        
+    # 🚀 [V16.16] 종목별 개별 매매 잠금 해제 기능
+    def reset_lock_for_ticker(self, ticker):
+        est = pytz.timezone('US/Eastern')
+        today = datetime.datetime.now(est).strftime('%Y-%m-%d')
+        locks = self._load_json(self.FILES["LOCKS"], {})
+        
+        keys_to_delete = [k for k in locks.keys() if k.startswith(f"{today}_{ticker}")]
+        if keys_to_delete:
+            for k in keys_to_delete:
+                del locks[k]
+            self._save_json(self.FILES["LOCKS"], locks)
     
     def get_seed(self, t):
         return float(self._load_json(self.FILES["SEED_CFG"], self.DEFAULT_SEED).get(t, 6720.0))

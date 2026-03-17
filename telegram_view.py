@@ -12,7 +12,6 @@ class TelegramView:
         season_short = "🌞서머타임 ON" if "Summer" in season_icon else "❄️서머타임 OFF"
         sync_time = "08:30" if target_hour == 17 else "09:30"
 
-        # 🚀 [V16.14] 방어 시스템 텍스트 간소화 및 수동 닻 올리기 안내 문구/이모지 개선
         return (
             f"🌌 <b>[ 다이내믹 스노우볼 TrueSync {latest_version} ]</b>\n" 
             f"⚡ <b>API 팩트 기반 무결성 동기화 엔진 가동</b> \n\n"
@@ -35,27 +34,30 @@ class TelegramView:
             "<i>┗ 🚨 수동 닻 올리기: 예산 부족으로 리버스 진입 후 예수금을 추가 입금하셨다면, 이 메뉴에서 반드시 '리버스 강제 해제'를 눌러 닻을 올려주세요!</i>"
         )
 
+    # 🚀 [V16.16] 종목별 매매 잠금(Lock) 분리
     def get_reset_menu(self):
         msg = (
             "🛠️ <b>[ 시스템 안전 통제실 ]</b>\n"
             "⚠️ 주의: 강제 초기화할 항목을 선택하세요."
         )
         keyboard = [
-            [InlineKeyboardButton("🔓 금일 매매 잠금(Lock) 해제", callback_data="RESET:LOCKS")],
-            [InlineKeyboardButton("🚨 SOXL 리버스 강제 해제", callback_data="RESET:REV:SOXL")],
-            [InlineKeyboardButton("🚨 TQQQ 리버스 강제 해제", callback_data="RESET:REV:TQQQ")],
+            [InlineKeyboardButton("🔓 [SOXL] 매매 잠금 해제", callback_data="RESET:LOCK:SOXL")],
+            [InlineKeyboardButton("🔓 [TQQQ] 매매 잠금 해제", callback_data="RESET:LOCK:TQQQ")],
+            [InlineKeyboardButton("🚨 [SOXL] 리버스/장부 초기화", callback_data="RESET:REV:SOXL")],
+            [InlineKeyboardButton("🚨 [TQQQ] 리버스/장부 초기화", callback_data="RESET:REV:TQQQ")],
             [InlineKeyboardButton("❌ 취소 및 닫기", callback_data="RESET:CANCEL")]
         ]
         return msg, InlineKeyboardMarkup(keyboard)
 
+    # 🚀 [V16.16] 에스크로 완전 초기화 문구 반영
     def get_reset_confirm_menu(self, ticker):
         msg = (
-            f"⚠️ <b>[ 경고: {ticker} 리버스 모드 해제 ]</b>\n\n"
-            f"정말로 {ticker}의 리버스 모드를 강제로 종료하시겠습니까?\n"
-            "<i>(충분한 시드가 추가되었을 때만 권장하며, 해제 시 다음부터 일반 모드로 돌아갑니다.)</i>"
+            f"⚠️ <b>[ 경고: {ticker} 리버스 및 가상장부 강제 초기화 ]</b>\n\n"
+            f"정말로 {ticker}의 리버스 모드를 종료하고 <b>가상장부(Escrow) 격리금액을 0원으로 완전 소각</b>하시겠습니까?\n"
+            "<i>(충분한 시드가 추가되었거나 로직 꼬임 시에만 권장하며, 해제 시 다음부터 일반 모드로 돌아갑니다.)</i>"
         )
         keyboard = [
-            [InlineKeyboardButton("✅ 네, 강제 해제합니다", callback_data=f"RESET:CONFIRM:{ticker}")],
+            [InlineKeyboardButton("✅ 네, 모두 초기화합니다", callback_data=f"RESET:CONFIRM:{ticker}")],
             [InlineKeyboardButton("❌ 아니오, 유지합니다", callback_data="RESET:MENU")]
         ]
         return msg, InlineKeyboardMarkup(keyboard)
@@ -102,7 +104,6 @@ class TelegramView:
             is_rev = t_info.get('is_reverse', False)
             proc_status = t_info['plan'].get('process_status', '')
             
-            # 🔥 [V16.7 엠뷸런스 UI] 긴급 수혈 시 시각적 알림 추가
             if proc_status == "🩸리버스(긴급수혈)":
                 body_msg += f"⚠️ <b>[🚨 비상 상황: {t} 긴급 수혈 중]</b>\n"
                 body_msg += f"❗ <i>에스크로 금고가 바닥나 강제 매도를 통해 현금을 생성합니다.</i>\n\n"

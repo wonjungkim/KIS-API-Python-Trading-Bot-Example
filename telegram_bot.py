@@ -10,7 +10,6 @@ from telegram.ext import ContextTypes
 from telegram_view import TelegramView 
 
 class TelegramController:
-    # 봇 초기화 및 의존성 주입을 받습니다.
     def __init__(self, config, broker, strategy):
         self.cfg = config
         self.broker = broker
@@ -20,7 +19,6 @@ class TelegramController:
         self.admin_id = self.cfg.get_chat_id()
         self.sync_locks = {} 
 
-    # 허가된 관리자 계정인지 확인합니다.
     def _is_admin(self, update: Update):
         if self.admin_id is None:
             self.admin_id = update.effective_chat.id
@@ -28,14 +26,12 @@ class TelegramController:
             return True
         return update.effective_chat.id == self.admin_id
 
-    # 현재 서머타임 적용 여부를 확인합니다.
     def _get_dst_info(self):
         est = pytz.timezone('US/Eastern')
         now_est = datetime.datetime.now(est)
         is_dst = now_est.dst() != datetime.timedelta(0)
         return (17, "🌞 <b>서머타임 적용 (Summer)</b>") if is_dst else (18, "❄️ <b>서머타임 해제 (Winter)</b>")
 
-    # 뉴욕 거래소 달력을 기반으로 프리/정규/애프터/마감 상태를 반환합니다.
     def _get_market_status(self):
         est = pytz.timezone('US/Eastern')
         now = datetime.datetime.now(est)
@@ -53,7 +49,6 @@ class TelegramController:
         elif market_close <= now < after_end: return "AFTER", "🌙 애프터마켓"
         else: return "CLOSE", "⛔ 장마감"
 
-    # 🚀 [V16.12] 스마트 예산 패스: 리버스 종목은 공용 파이(예산)를 뺏지 않고 양보합니다.
     def _calculate_budget_allocation(self, cash, tickers):
         sorted_tickers = sorted(tickers, key=lambda x: 0 if x == "SOXL" else (1 if x == "TQQQ" else 2))
         allocated = {}
@@ -61,12 +56,10 @@ class TelegramController:
         rem_cash = cash
         
         for tx in sorted_tickers:
-            # 현재 종목이 리버스 모드인지 확인
             rev_state = self.cfg.get_reverse_state(tx)
             is_rev = rev_state.get("is_active", False)
             
             if is_rev:
-                # 리버스 모드 당사자는 에스크로를 쓰거나 의무매도를 하므로 1회분 공용 예산을 선점하지 않음 (0원 예약)
                 portion = 0.0
             else:
                 split = self.cfg.get_split_count(tx)
@@ -77,12 +70,11 @@ class TelegramController:
                 rem_cash -= portion
             else: 
                 allocated[tx] = 0
-                if not is_rev: # 일반 모드인데 돈이 부족할 때만 터보 OFF
+                if not is_rev:
                     force_turbo_off = True 
                     
         return sorted_tickers, allocated, force_turbo_off
 
-    # 텔레그램 시작 명령어(/start) 처리
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self._is_admin(update): return
         target_hour, season_icon = self._get_dst_info()
@@ -90,7 +82,6 @@ class TelegramController:
         msg = self.view.get_start_message(target_hour, season_icon, latest_version) 
         await update.message.reply_text(msg, parse_mode='HTML')
 
-    # 통합 지시서 작성 명령어(/sync) 처리
     async def cmd_sync(self, update, context):
         if not self._is_admin(update): return
         await update.message.reply_text("🔄 시장 분석 및 지시서 작성 중...")
@@ -105,6 +96,11 @@ class TelegramController:
         status_code, status_text = self._get_market_status()
         
         tickers = self.cfg.get_active_tickers()
+        
+        # 🚀 [V16.16 핵심] /sync 호출 시에도 리버스 1일차 누적 점검(멱등성)
+        for t in tickers:
+            self.cfg.update_reverse_day_if_needed(t)
+            
         sorted_tickers, allocated_cash, force_turbo_off = self._calculate_budget_allocation(cash, tickers)
         
         ticker_data_list = []
@@ -142,7 +138,6 @@ class TelegramController:
         final_msg, markup = self.view.create_sync_report(status_text, dst_txt, cash, rp_amount, ticker_data_list, status_code in ["PRE", "REG"])
         await update.message.reply_text(final_msg, reply_markup=markup, parse_mode='HTML')
 
-    # 🚀 [V16.1] 장부 무결성 동기화 명령어(/record) 긴급 부활!
     async def cmd_record(self, update, context):
         if not self._is_admin(update): return
         chat_id = update.message.chat_id
@@ -156,9 +151,7 @@ class TelegramController:
         if success_tickers: await self._display_ledger(success_tickers[0], chat_id, context, message_obj=status_msg)
         else: await status_msg.edit_text("✅ <b>동기화 완료</b> (표시할 진행 중인 장부가 없거나 에러 대기 중입니다)", parse_mode='HTML')
 
-    # 🚀 [V16.8] 에스크로 가상 장부 동적 보정 (Idempotent 방식)
     def _sync_escrow_cash(self, ticker):
-        """리버스 모드 당사자의 매수/매도 팩트(장부)를 기반으로 에스크로 금고 잔액을 실시간 역산하여 정확하게 보정합니다."""
         is_rev = self.cfg.get_reverse_state(ticker).get("is_active", False)
         if not is_rev:
             self.cfg.clear_escrow_cash(ticker)
@@ -177,11 +170,13 @@ class TelegramController:
                 
         self.cfg.set_escrow_cash(ticker, max(0.0, escrow))
 
-    # 🚀 [V15.8] 스마트 영업일 역산 엔진 + 스냅샷 닻(Anchor) + 액분 방어 하이브리드
     async def process_auto_sync(self, ticker, chat_id, context, silent_ledger=False):
         if self.sync_locks.get(ticker, False): return "LOCKED"
         self.sync_locks[ticker] = True 
         try:
+            # 🚀 [V16.16 핵심] 동기화 과정 시작 시 무조건 리버스 누적일 체크 
+            self.cfg.update_reverse_day_if_needed(ticker)
+            
             _, holdings = self.broker.get_account_balance()
             if holdings is None:
                 await context.bot.send_message(chat_id, f"❌ <b>[{ticker}] API 오류</b>\n잔고를 불러오지 못했습니다.", parse_mode='HTML')
@@ -203,7 +198,6 @@ class TelegramController:
                 if not silent_ledger: await self._display_ledger(ticker, chat_id, context)
                 return "SUCCESS"
 
-            # 🔥 [V16.0 부활] 1번 로직 복구: 졸업 시 자동 복리 및 명예의 전당 저장 로직 완벽 연결
             if actual_qty == 0:
                 if ledger_qty > 0:
                     kst = pytz.timezone('Asia/Seoul')
@@ -240,12 +234,10 @@ class TelegramController:
             target_execs = self.broker.get_execution_history(ticker, target_kis_str, target_kis_str)
             kis_target_trades = len(target_execs)
             
-            # 🚀 [V16.6 핫픽스] KST vs EST 시차로 인한 지문 대조(1-Line Curse) 타임 패러독스 완벽 방어
             is_only_snapshot = (len(recs) == 1 and 'INIT' in str(recs[0].get('exec_id', '')))
             ledger_target_trades = len([r for r in recs if r['date'] == target_ledger_str and 'INIT' not in str(r.get('exec_id', ''))])
             
             if is_only_snapshot and diff == 0 and price_diff < 0.01:
-                # 장부가 1줄 스냅샷인데 수량/평단가가 완벽히 일치하면, 시차로 인한 무의미한 지문 대조 패스
                 micro_mismatch = False
             else:
                 has_init_today = any('INIT' in str(r.get('exec_id', '')) for r in recs if r['date'] == target_ledger_str)
@@ -366,8 +358,6 @@ class TelegramController:
             actual_avg = float(holdings.get(ticker, {'avg': 0})['avg']) if holdings else 0.0
             
             split = self.cfg.get_split_count(ticker)
-            
-            # 🚀 [V16.11 신규 최적화] 중앙 집중형 T값 산출 함수 호출
             t_val, _ = self.cfg.get_absolute_t_val(ticker, actual_qty, actual_avg)
             
             report += f"📊 <b>[ 현재 진행 상황 요약 ]</b>\n"
@@ -463,9 +453,10 @@ class TelegramController:
             if sub == "MENU":
                 msg, markup = self.view.get_reset_menu()
                 await query.edit_message_text(msg, reply_markup=markup, parse_mode='HTML')
-            elif sub == "LOCKS":
-                self.cfg.reset_locks()
-                await query.edit_message_text("✅ <b>금일 매매 잠금이 모두 해제되었습니다.</b>", parse_mode='HTML')
+            elif sub == "LOCK": # 🚀 [V16.16] 종목별 매매 잠금 해제 반영
+                ticker = data[2]
+                self.cfg.reset_lock_for_ticker(ticker)
+                await query.edit_message_text(f"✅ <b>[{ticker}] 금일 매매 잠금이 해제되었습니다.</b>", parse_mode='HTML')
             elif sub == "REV":
                 ticker = data[2]
                 msg, markup = self.view.get_reset_confirm_menu(ticker)
@@ -473,7 +464,8 @@ class TelegramController:
             elif sub == "CONFIRM":
                 ticker = data[2]
                 self.cfg.set_reverse_state(ticker, False, 0)
-                await query.edit_message_text(f"✅ <b>[{ticker}] 리버스 모드가 강제 해제되었습니다.</b>\n(다음 주문부터 일반 모드로 복귀합니다.)", parse_mode='HTML')
+                self.cfg.clear_escrow_cash(ticker) # 🚀 [V16.16] 가상장부 완벽 소각 반영
+                await query.edit_message_text(f"✅ <b>[{ticker}] 리버스 모드 및 가상장부(Escrow)가 모두 강제 초기화되었습니다.</b>\n(다음 주문부터 일반 모드로 복귀합니다.)", parse_mode='HTML')
             elif sub == "CANCEL":
                 await query.edit_message_text("❌ 안전 통제실 메뉴를 닫습니다.", parse_mode='HTML')
 
