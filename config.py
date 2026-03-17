@@ -28,6 +28,7 @@ class ConfigManager:
             "TURBO": "data/turbo_mode.dat",
             "PROFIT_CFG": "data/profit_config.json",
             "LOCKS": "data/trade_locks.json",
+            "ESCROW": "data/escrow.json",
             "SEED_CFG": "data/seed_config.json",         
             "COMPOUND_CFG": "data/compound_config.json",
             "VERSION_CFG": "data/version_config.json",
@@ -71,42 +72,49 @@ class ConfigManager:
 
     # 🚀 [V16.8] 휘발성 가상 장부(Escrow) 로직 - 타 종목 예산 탈취 원천 차단
     def get_escrow_cash(self, ticker):
-        locks = self._load_json(self.FILES["LOCKS"], {})
-        return float(locks.get(f"ESCROW_{ticker}", 0.0))
+        escrow = self._load_json(self.FILES["ESCROW"], {})
+        return float(escrow.get(ticker, 0.0))
 
     def set_escrow_cash(self, ticker, amount):
-        locks = self._load_json(self.FILES["LOCKS"], {})
-        locks[f"ESCROW_{ticker}"] = float(amount)
-        self._save_json(self.FILES["LOCKS"], locks)
+        escrow = self._load_json(self.FILES["ESCROW"], {})
+        escrow[ticker] = float(amount)
+        self._save_json(self.FILES["ESCROW"], escrow)
 
     def add_escrow_cash(self, ticker, amount):
         current = self.get_escrow_cash(ticker)
         self.set_escrow_cash(ticker, current + float(amount))
 
     def clear_escrow_cash(self, ticker):
-        locks = self._load_json(self.FILES["LOCKS"], {})
-        if f"ESCROW_{ticker}" in locks:
-            del locks[f"ESCROW_{ticker}"]
-            self._save_json(self.FILES["LOCKS"], locks)
+        escrow = self._load_json(self.FILES["ESCROW"], {})
+        if ticker in escrow:
+            del escrow[ticker]
+            self._save_json(self.FILES["ESCROW"], escrow)
 
     def get_total_locked_cash(self, exclude_ticker=None):
-        locks = self._load_json(self.FILES["LOCKS"], {})
+        escrow = self._load_json(self.FILES["ESCROW"], {})
         total = 0.0
-        for k, v in locks.items():
-            if k.startswith("ESCROW_"):
-                ticker_in_lock = k.replace("ESCROW_", "")
-                if ticker_in_lock != exclude_ticker:
-                    total += float(v)
+        for ticker, amount in escrow.items():
+            if ticker != exclude_ticker:
+                total += float(amount)
         return total
 
-    # 🚀 [V15.1] T값 산출 절대 공식: (총 매수액 / 1회분)
-    def calculate_v15_t_val(self, ticker):
-        recs = [r for r in self.get_ledger() if r['ticker'] == ticker]
-        total_buy_amt = sum(r['price'] * r['qty'] for r in recs if r['side'] == 'BUY')
-        
+    # 1회 매수분(one_portion) 산출 및 유효성 검사
+    def get_one_portion(self, ticker):
         seed = self.get_seed(ticker)
         split = self.get_split_count(ticker)
-        one_portion = seed / split if split > 0 else 1
+        
+        if seed <= 0 or split <= 0:
+            raise ValueError(f"⚠️ [{ticker}] 설정 오류: 시드({seed}) 또는 분할수({split})가 0입니다. /seed 또는 /ticker 명령어로 설정을 확인해주세요.")
+            
+        return seed / split
+
+    # T값 산출 절대 공식: (총 매수액 / 1회분)
+    def calculate_t_val(self, ticker, qty, avg_price):
+        # 🔥 실제 잔고(KIS 팩트)를 기반으로 총 매수액 산출
+        total_buy_amt = qty * avg_price
+        
+        # 유효성 검사가 포함된 one_portion 호출
+        one_portion = self.get_one_portion(ticker)
         
         t_val = total_buy_amt / one_portion
         return round(t_val, 4)

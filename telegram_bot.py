@@ -516,7 +516,8 @@ class TelegramController:
                 res = self.broker.send_order(t, o['side'], o['qty'], o['price'], o['type'])
                 is_success = res.get('rt_cd') == '0'
                 if is_success: success_count += 1
-                msg += f"└ {o['desc']}: {'✅' if is_success else f'❌({res.get('msg1')})'}\n"
+                status_icon = "✅" if is_success else f"❌({res.get('msg1')})"
+                msg += f"└ {o['desc']}: {status_icon}\n"
             
             if success_count > 0:
                 self.cfg.set_lock(t, "REG")
@@ -573,12 +574,12 @@ class TelegramController:
                 ticker = parts[2]
                 d = self.cfg._load_json(self.cfg.FILES["PROFIT_CFG"], self.cfg.DEFAULT_TARGET)
                 d[ticker] = val; self.cfg._save_json(self.cfg.FILES["PROFIT_CFG"], d)
-                update.message.reply_text(f"✅ [{ticker}] 목표: {val}%")
+                await update.message.reply_text(f"✅ [{ticker}] 목표: {val}%")
                 
             elif state.startswith("CONF_COMPOUND"):
                 ticker = parts[2]
                 self.cfg.set_compound_rate(ticker, val)
-                update.message.reply_text(f"✅ [{ticker}] 졸업 시 자동 복리율: {val}%")
+                await update.message.reply_text(f"✅ [{ticker}] 졸업 시 자동 복리율: {val}%")
                 
             del self.user_states[chat_id]
         except: await update.message.reply_text("❌ 오류: 숫자를 입력하세요.")
