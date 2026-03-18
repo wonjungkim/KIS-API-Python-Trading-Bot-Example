@@ -1,4 +1,3 @@
-# 파일명: broker.py
 import requests
 import json
 import time
@@ -158,21 +157,6 @@ class KoreaInvestmentBroker:
         except Exception as e:
             return 0.0
 
-    def get_historical_close_prices(self, ticker, date_str):
-        try:
-            if len(date_str) == 8 and date_str.isdigit():
-                date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
-                
-            stock = yf.Ticker(ticker)
-            start_date = datetime.datetime.strptime(date_str, '%Y-%m-%d')
-            end_date = start_date + datetime.timedelta(days=1)
-            
-            daily_df = stock.history(start=start_date.strftime('%Y-%m-%d'), end=end_date.strftime('%Y-%m-%d'), interval="1d")
-            if daily_df.empty: return 0.0
-            return round(float(daily_df['Close'].iloc[-1]), 2)
-        except Exception as e:
-            return 0.0
-
     def get_previous_close(self, ticker):
         try: return yf.Ticker(ticker).fast_info['previous_close']
         except: return 0.0
@@ -184,18 +168,6 @@ class KoreaInvestmentBroker:
             if len(hist) >= 5: return float(hist['Close'][-5:].mean())
             return 0.0
         except: return 0.0
-
-    def check_recent_split(self, ticker):
-        try:
-            stock = yf.Ticker(ticker)
-            splits = stock.splits
-            if not splits.empty:
-                splits.index = splits.index.tz_localize(None)
-                thirty_days_ago = datetime.datetime.now() - datetime.timedelta(days=30)
-                recent_splits = splits[splits.index >= thirty_days_ago]
-                if not recent_splits.empty: return float(recent_splits.iloc[-1])
-        except Exception as e: pass
-        return 0.0
 
     def get_unfilled_orders(self, ticker):
         params = {"CANO": self.cano, "ACNT_PRDT_CD": self.acnt_prdt_cd, "OVRS_EXCG_CD": "NASD", "SORT_SQN": "DS", "CTX_AREA_FK100": "", "CTX_AREA_NK100": ""}

@@ -1,4 +1,3 @@
-# 파일명: config.py
 import json
 import os
 import datetime
@@ -6,18 +5,19 @@ import pytz
 import math
 import time
 
-# [V14.5] 파이썬 파일(.py)로 분리된 버전 히스토리를 모듈로 즉시 임포트합니다.
 try:
     from version_history import VERSION_HISTORY
 except ImportError:
-    # version_history.py 파일이 누락되었을 경우를 대비한 안전 장치
-    VERSION_HISTORY = [
-        "V14.x [-] 버전 기록 파일(version_history.py)을 찾을 수 없습니다."
-    ]
+    VERSION_HISTORY = ["V14.x [-] 버전 기록 파일(version_history.py)을 찾을 수 없습니다."]
+
+# 🚀 [V16.17] 박제된 아카이브 파일 로드
+try:
+    from version_archive import VERSION_ARCHIVE
+except ImportError:
+    VERSION_ARCHIVE = []
 
 class ConfigManager:
     def __init__(self):
-        # [V14.2] 모든 데이터/설정 파일이 data/ 디렉토리 내부에서 생성되고 관리되도록 경로 수정
         self.FILES = {
             "TOKEN": "data/token.dat",
             "CHAT_ID": "data/chat_id.dat",
@@ -32,7 +32,7 @@ class ConfigManager:
             "SEED_CFG": "data/seed_config.json",         
             "COMPOUND_CFG": "data/compound_config.json",
             "VERSION_CFG": "data/version_config.json",
-            "REVERSE_CFG": "data/reverse_config.json" # [V14.1 리버스모드] 상태 보관용 파일 추가
+            "REVERSE_CFG": "data/reverse_config.json"
         }
         
         self.DEFAULT_SEED = {"SOXL": 6720.0, "TQQQ": 6720.0}
@@ -70,7 +70,6 @@ class ConfigManager:
     def get_ledger(self):
         return self._load_json(self.FILES["LEDGER"], [])
 
-    # 🚀 [V16.8] 휘발성 가상 장부(Escrow) 로직 - 타 종목 예산 탈취 원천 차단
     def get_escrow_cash(self, ticker):
         escrow = self._load_json(self.FILES["ESCROW"], {})
         return float(escrow.get(ticker, 0.0))
@@ -108,18 +107,14 @@ class ConfigManager:
             
         return seed / split
 
-    # T값 산출 절대 공식: (총 매수액 / 1회분)
-    def calculate_t_val(self, ticker, qty, avg_price):
-        # 🔥 실제 잔고(KIS 팩트)를 기반으로 총 매수액 산출
-        total_buy_amt = qty * avg_price
-        
-        # 유효성 검사가 포함된 one_portion 호출
-        one_portion = self.get_one_portion(ticker)
-        
-        t_val = total_buy_amt / one_portion
-        return round(t_val, 4)
+    def get_absolute_t_val(self, ticker, actual_qty, actual_avg_price):
+        # seed = self.get_seed(ticker)
+        # split = self.get_split_count(ticker)
+        # one_portion = seed / split if split > 0 else 1
+        one_portion = self.get_one_protion(ticker)
+        t_val = (actual_qty * actual_avg_price) / one_portion if one_portion > 0 else 0.0
+        return round(t_val, 4), one_portion
 
-    # 🚀 [V15.3] 제네시스 장부 캐싱
     def overwrite_genesis_ledger(self, ticker, genesis_records, actual_avg):
         ledger = self.get_ledger()
         remaining = [r for r in ledger if r['ticker'] != ticker]
@@ -138,7 +133,6 @@ class ConfigManager:
             })
         self._save_json(self.FILES["LEDGER"], remaining)
 
-    # 🚀 [V15.5] 증분 업데이트 (1일 치만 교체하여 덮어쓰기)
     def overwrite_incremental_ledger(self, ticker, temp_recs, new_today_records):
         ledger = self.get_ledger()
         remaining = [r for r in ledger if r['ticker'] != ticker]
@@ -164,7 +158,6 @@ class ConfigManager:
         remaining.extend(updated_ticker_recs)
         self._save_json(self.FILES["LEDGER"], remaining)
 
-    # [V15] 로직 1-A / 1-B: 장부를 현재 잔고로 강제 덮어쓰기
     def overwrite_ledger(self, ticker, actual_qty, actual_avg):
         ledger = self.get_ledger()
         remaining = [r for r in ledger if r['ticker'] != ticker]
@@ -184,9 +177,7 @@ class ConfigManager:
         ledger = self.get_ledger()
         remaining = [r for r in ledger if r['ticker'] != ticker]
         self._save_json(self.FILES["LEDGER"], remaining)
-        # [V14.1 리버스모드] 졸업 시 리버스모드 상태도 초기화
         self.set_reverse_state(ticker, False, 0, 0.0)
-        # 🚀 [V16.8] 졸업 시 휘발성 가상 장부 에스크로 잔금도 함께 소각
         self.clear_escrow_cash(ticker)
 
     def calculate_holdings(self, ticker, records=None):
@@ -220,12 +211,28 @@ class ConfigManager:
 
     def get_reverse_state(self, ticker):
         d = self._load_json(self.FILES["REVERSE_CFG"], {})
-        return d.get(ticker, {"is_active": False, "day_count": 0, "exit_target": 0.0})
+        return d.get(ticker, {"is_active": False, "day_count": 0, "exit_target": 0.0, "last_update_date": ""})
 
-    def set_reverse_state(self, ticker, is_active, day_count, exit_target=0.0):
+    def set_reverse_state(self, ticker, is_active, day_count, exit_target=0.0, last_update_date=None):
+        if last_update_date is None:
+            kst = pytz.timezone('Asia/Seoul')
+            last_update_date = datetime.datetime.now(kst).strftime('%Y-%m-%d')
+            
         d = self._load_json(self.FILES["REVERSE_CFG"], {})
-        d[ticker] = {"is_active": is_active, "day_count": day_count, "exit_target": exit_target}
+        d[ticker] = {"is_active": is_active, "day_count": day_count, "exit_target": exit_target, "last_update_date": last_update_date}
         self._save_json(self.FILES["REVERSE_CFG"], d)
+
+    def update_reverse_day_if_needed(self, ticker):
+        state = self.get_reverse_state(ticker)
+        if state.get("is_active"):
+            kst = pytz.timezone('Asia/Seoul')
+            today_str = datetime.datetime.now(kst).strftime('%Y-%m-%d')
+            
+            if state.get("last_update_date") != today_str:
+                new_day = state.get("day_count", 0) + 1
+                self.set_reverse_state(ticker, True, new_day, state.get("exit_target", 0.0), today_str)
+                return True
+        return False
 
     def calculate_v14_state(self, ticker):
         ledger = self.get_ledger()
@@ -233,54 +240,44 @@ class ConfigManager:
         
         seed = self.get_seed(ticker)
         split = self.get_split_count(ticker)
+        base_portion = seed / split if split > 0 else 1
         
         holdings = 0
-        t_val = 0.0
         rem_cash = seed
+        total_invested = 0.0
         
         for r in target_recs:
             if holdings == 0:
-                t_val = 0.0
                 rem_cash = seed
+                total_invested = 0.0
                 
             qty = r['qty']
-            price = r['price']
-            amt = qty * price
-            
-            is_rec_rev = r.get('is_reverse', False) 
+            amt = qty * r['price']
             
             if r['side'] == 'BUY':
-                if holdings == 0 and 'SYNC' in str(r.get('exec_id', '')):
-                    t_val = amt / (seed / split) if split > 0 else 0
-                    rem_cash -= amt
-                else:
-                    if is_rec_rev:
-                        t_val += (split - t_val) * 0.25
-                        rem_cash -= amt
-                    else:
-                        budget_of_day = rem_cash / (split - t_val) if (split - t_val) > 0 else rem_cash
-                        t_val += (amt / budget_of_day) if budget_of_day > 0 else 0
-                        rem_cash -= amt
+                rem_cash -= amt
                 holdings += qty
+                total_invested += amt
                 
             elif r['side'] == 'SELL':
                 if qty >= holdings: 
                     holdings = 0
-                    t_val = 0.0
                     rem_cash = seed
+                    total_invested = 0.0
                 else: 
+                    if holdings > 0:
+                        avg_price = total_invested / holdings
+                        total_invested -= (qty * avg_price)
                     holdings -= qty
-                    if is_rec_rev:
-                        multiplier = 0.9 if split <= 20 else 0.95
-                        t_val *= multiplier
-                    else:
-                        t_val *= 0.75
                     rem_cash += amt
                     
+        avg_price = total_invested / holdings if holdings > 0 else 0.0
+        t_val = (holdings * avg_price) / base_portion if base_portion > 0 else 0.0
+            
         if holdings > 0:
             current_budget = rem_cash / (split - t_val) if (split - t_val) > 0 else rem_cash
         else:
-            current_budget = seed / split
+            current_budget = base_portion
             t_val = 0.0
             
         return max(0.0, round(t_val, 4)), max(0.0, current_budget), max(0.0, rem_cash)
@@ -352,15 +349,21 @@ class ConfigManager:
         
         return new_hist, added_seed
 
+    # 🚀 [V16.17] 전체 버전 히스토리(과거+현재) 반환
+    def get_full_version_history(self):
+        return VERSION_ARCHIVE + VERSION_HISTORY
+
+    # 최신 버전 히스토리 반환
     def get_version_history(self):
         return VERSION_HISTORY
 
     def get_latest_version(self):
         history = self.get_version_history()
         if history and len(history) > 0:
-            if isinstance(history[0], str):
-                return history[0].split(' ')[0] 
-            return history[0].get("version", "V14.x")
+            latest_entry = history[-1]
+            if isinstance(latest_entry, str):
+                return latest_entry.split(' ')[0] 
+            return latest_entry.get("version", "V14.x")
         return "V14.x"
 
     def get_history(self):
@@ -381,6 +384,17 @@ class ConfigManager:
 
     def reset_locks(self):
         self._save_json(self.FILES["LOCKS"], {})
+        
+    def reset_lock_for_ticker(self, ticker):
+        est = pytz.timezone('US/Eastern')
+        today = datetime.datetime.now(est).strftime('%Y-%m-%d')
+        locks = self._load_json(self.FILES["LOCKS"], {})
+        
+        keys_to_delete = [k for k in locks.keys() if k.startswith(f"{today}_{ticker}")]
+        if keys_to_delete:
+            for k in keys_to_delete:
+                del locks[k]
+            self._save_json(self.FILES["LOCKS"], locks)
     
     def get_seed(self, t):
         return float(self._load_json(self.FILES["SEED_CFG"], self.DEFAULT_SEED).get(t, 6720.0))
