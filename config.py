@@ -1,9 +1,14 @@
+# ==========================================================
+# [config]
+# ⚠️ 이 주석 및 파일명 표기는 절대 지우지 마세요.
+# ==========================================================
 import json
 import os
 import datetime
 import pytz
 import math
 import time
+import pandas_market_calendars as mcal
 
 try:
     from version_history import VERSION_HISTORY
@@ -219,9 +224,19 @@ class ConfigManager:
             today_str = datetime.datetime.now(kst).strftime('%Y-%m-%d')
             
             if state.get("last_update_date") != today_str:
-                new_day = state.get("day_count", 0) + 1
-                self.set_reverse_state(ticker, True, new_day, state.get("exit_target", 0.0), today_str)
-                return True
+                est = pytz.timezone('US/Eastern')
+                now_est = datetime.datetime.now(est)
+                nyse = mcal.get_calendar('NYSE')
+                
+                is_trading_day = not nyse.schedule(start_date=now_est.date(), end_date=now_est.date()).empty
+                
+                if is_trading_day:
+                    new_day = state.get("day_count", 0) + 1
+                    self.set_reverse_state(ticker, True, new_day, state.get("exit_target", 0.0), today_str)
+                    return True
+                else:
+                    self.set_reverse_state(ticker, True, state.get("day_count", 0), state.get("exit_target", 0.0), today_str)
+                    return False
         return False
 
     def calculate_v14_state(self, ticker):
