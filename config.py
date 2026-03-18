@@ -111,7 +111,7 @@ class ConfigManager:
         # seed = self.get_seed(ticker)
         # split = self.get_split_count(ticker)
         # one_portion = seed / split if split > 0 else 1
-        one_portion = self.get_one_protion(ticker)
+        one_portion = self.get_one_portion(ticker)
         t_val = (actual_qty * actual_avg_price) / one_portion if one_portion > 0 else 0.0
         return round(t_val, 4), one_portion
 

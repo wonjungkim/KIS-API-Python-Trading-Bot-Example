@@ -160,9 +160,9 @@ async def scheduled_regular_trade(context):
                 # 🚀 [V16.16] 이곳에 있던 rev_day + 1 누적 로직은 삭제되었습니다.
                 # (이제 08:30 / record / sync 시점에서 멱등성 캘린더 엔진이 1회 누적을 완벽히 보장합니다.)
                     
-                    rev_state = cfg.get_reverse_state(t)
-                    if rev_state["is_active"]:
-                        cfg.set_reverse_state(t, True, rev_state["day_count"] + 1)
+                rev_state = cfg.get_reverse_state(t)
+                if rev_state["is_active"]:
+                    cfg.set_reverse_state(t, True, rev_state["day_count"] + 1)
                         
                 await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode='HTML')
         except ValueError as e:
