@@ -3,6 +3,7 @@ import logging
 import datetime
 import pytz
 import time
+import math
 import asyncio
 import pandas_market_calendars as mcal
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
@@ -112,8 +113,96 @@ async def scheduled_premarket_monitor(context):
                 for o in plan['orders']:
                     res = broker.send_order(t, o['side'], o['qty'], o['price'], o['type'])
                     msg += f"\n└ {o['desc']}: {'✅' if res.get('rt_cd') == '0' else f'❌({res.get('msg1')})'}"
-                    await asyncio.sleep(0.2) # 🚀 [V18.0] API Throttle 방어
+                    await asyncio.sleep(0.2) 
                 await context.bot.send_message(chat_id=context.job.chat_id, text=msg, parse_mode='HTML')
+
+async def scheduled_sniper_monitor(context):
+    if not is_market_open(): return
+    
+    est = pytz.timezone('US/Eastern')
+    now_est = datetime.datetime.now(est)
+    nyse = mcal.get_calendar('NYSE')
+    schedule = nyse.schedule(start_date=now_est.date(), end_date=now_est.date())
+    if schedule.empty: return
+    
+    market_open = schedule.iloc[0]['market_open'].astimezone(est)
+    market_close = schedule.iloc[0]['market_close'].astimezone(est)
+    
+    pre_start = market_open.replace(hour=4, minute=0)
+    start_monitor = pre_start + datetime.timedelta(minutes=1)
+    end_monitor = market_close - datetime.timedelta(minutes=15)
+    
+    if not (start_monitor <= now_est <= end_monitor):
+        return
+
+    app_data = context.job.data
+    cfg, broker, tx_lock = app_data['cfg'], app_data['broker'], app_data['tx_lock']
+    chat_id = context.job.chat_id
+    
+    async with tx_lock:
+        _, holdings = broker.get_account_balance()
+        if holdings is None: return
+        
+        for t in cfg.get_active_tickers():
+            if cfg.get_version(t) != "V17": continue
+            if cfg.check_lock(t, "SNIPER"): continue 
+            
+            h = holdings.get(t, {'qty': 0, 'avg': 0})
+            qty = int(h['qty'])
+            avg_price = float(h['avg'])
+            if qty == 0: continue
+            
+            curr_p = await asyncio.to_thread(broker.get_current_price, t)
+            if curr_p <= 0: continue
+            
+            target_pct_val = cfg.get_target_profit(t)
+            target_price = math.ceil(avg_price * (1 + target_pct_val / 100.0) * 100) / 100.0
+            
+            split = cfg.get_split_count(t)
+            t_val, _ = cfg.get_absolute_t_val(t, qty, avg_price)
+            
+            depreciation_factor = 2.0 / split if split > 0 else 0.1
+            star_ratio = (target_pct_val / 100.0) - ((target_pct_val / 100.0) * depreciation_factor * t_val)
+            star_price = math.ceil(avg_price * (1 + star_ratio) * 100) / 100.0
+            
+            if curr_p >= target_price:
+                await asyncio.to_thread(broker.cancel_all_orders_safe, t)
+                res = broker.send_order(t, "SELL", qty, curr_p, "LIMIT")
+                if res.get('rt_cd') == '0':
+                    cfg.set_lock(t, "SNIPER")
+                    msg = f"🔥 <b>[{t}] 스나이퍼 잭팟 터짐! (목표가 돌파)</b>\n"
+                    msg += f"🎯 실시간 현재가(${curr_p:.2f})가 목표가(${target_price:.2f})를 돌파하여 <b>전량 강제 익절</b> 처리했습니다.\n"
+                    msg += "🔫 당일 스나이퍼 활동을 완전 종료합니다."
+                    await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode='HTML')
+                continue
+            
+            is_first_half = t_val < (split / 2)
+            trigger_price = star_price if is_first_half else math.ceil(avg_price * 1.0025 * 100) / 100.0
+            
+            if curr_p >= trigger_price:
+                unfilled = await asyncio.to_thread(broker.get_unfilled_orders_detail, t)
+                target_odno = None
+                
+                for o in unfilled:
+                    if o.get('sll_buy_dvsn_cd') == '01': 
+                        target_odno = o.get('odno')
+                        break
+                        
+                if target_odno:
+                    await asyncio.to_thread(broker.cancel_order, t, target_odno)
+                    await asyncio.sleep(1.0) 
+                    
+                    q_qty = math.ceil(qty / 4)
+                    res = broker.send_order(t, "SELL", q_qty, curr_p, "LIMIT")
+                    
+                    if res.get('rt_cd') == '0':
+                        cfg.set_lock(t, "SNIPER")
+                        phase = "전반전(별값 돌파)" if is_first_half else "후반전(본전+수수료 돌파)"
+                        msg = f"🔫 <b>[{t}] V17 시크릿 쿼터 익절 발동! ({phase})</b>\n"
+                        msg += f"🎯 실시간 현재가: ${curr_p:.2f} (트리거: ${trigger_price:.2f})\n"
+                        msg += f"🛡️ 기존 방어선(LOC 매도)을 해제하고 {q_qty}주를 <b>현재가 지정가(LIMIT)</b>로 즉시 낚아챘습니다!\n"
+                        msg += "🔒 당일 해당 종목의 스나이퍼 활동은 안전하게 종료(Lock)됩니다."
+                        await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode='HTML')
 
 async def scheduled_regular_trade(context):
     if not is_market_open(): return
@@ -136,7 +225,6 @@ async def scheduled_regular_trade(context):
         msgs = {t: "" for t in sorted_tickers}
         all_success = {t: True for t in sorted_tickers}
 
-        # 0. 전략 일괄 수립 (Pre-fetch Plans)
         for t in sorted_tickers:
             if cfg.check_lock(t, "REG"): continue
             h = holdings.get(t, {'qty': 0, 'avg': 0})
@@ -153,7 +241,6 @@ async def scheduled_regular_trade(context):
                 title = f"🔄 <b>[{t}] 리버스 주문 실행 (교차 전송)</b>\n" if is_rev else f"💎 <b>[{t}] 정규장 주문 실행 (교차 전송)</b>\n"
                 msgs[t] += title
 
-        # 1. 제 1라운드: 생존 필수 매수 (Core Buy) 교차 전송
         for t in sorted_tickers:
             if t not in plans or not plans[t]['orders']: continue
             for o in plans[t].get('core_orders', []):
@@ -161,18 +248,16 @@ async def scheduled_regular_trade(context):
                 is_success = res.get('rt_cd') == '0'
                 if not is_success: all_success[t] = False
                 msgs[t] += f"└ 1차 필수: {o['desc']} {o['qty']}주: {'✅' if is_success else f'❌({res.get('msg1')})'}\n"
-                await asyncio.sleep(0.2) # 🚀 [V18.0] API Throttle 방어
+                await asyncio.sleep(0.2) 
 
-        # 2. 제 2라운드: 보너스 줍줍 (JubJub Extra) 교차 전송
         for t in sorted_tickers:
             if t not in plans or not plans[t]['orders']: continue
             for o in plans[t].get('bonus_orders', []):
                 res = broker.send_order(t, o['side'], o['qty'], o['price'], o['type'])
                 is_success = res.get('rt_cd') == '0'
                 msgs[t] += f"└ 2차 보너스: {o['desc']} {o['qty']}주: {'✅' if is_success else '❌(잔금패스)'}\n"
-                await asyncio.sleep(0.2) # 🚀 [V18.0] API Throttle 방어
+                await asyncio.sleep(0.2) 
 
-        # 3. 매매 결과 판정 및 락다운
         for t in sorted_tickers:
             if t not in plans or not plans[t]['orders']: continue
             
@@ -264,6 +349,8 @@ def main():
         jq.run_daily(scheduled_force_reset, time=datetime.time(TARGET_HOUR, 0, tzinfo=kst), days=(0,1,2,3,4), chat_id=cfg.get_chat_id(), data=app_data)
         jq.run_repeating(scheduled_premarket_monitor, interval=60, chat_id=cfg.get_chat_id(), data=app_data)
         jq.run_daily(scheduled_regular_trade, time=datetime.time(TARGET_HOUR, 30, tzinfo=kst), days=(0,1,2,3,4), chat_id=cfg.get_chat_id(), data=app_data)
+        
+        jq.run_repeating(scheduled_sniper_monitor, interval=60, chat_id=cfg.get_chat_id(), data=app_data)
         
     app.run_polling()
 

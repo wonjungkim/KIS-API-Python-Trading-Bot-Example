@@ -140,7 +140,6 @@ class KoreaInvestmentBroker:
         
         return cash, holdings
 
-    # 🌟 [V17.6 패치] KIS API (HHDFS76200200) Fallback 적용
     def get_current_price(self, ticker, is_market_closed=False):
         try:
             stock = yf.Ticker(ticker)
@@ -161,7 +160,6 @@ class KoreaInvestmentBroker:
             print(f"❌ [한투 API] 현재가 우회 조회 실패: {e}")
         return 0.0
 
-    # 🌟 [V17.6 패치] KIS API (HHDFS76200200) Fallback 적용
     def get_previous_close(self, ticker):
         try: return float(yf.Ticker(ticker).fast_info['previous_close'])
         except Exception as e:
@@ -203,10 +201,24 @@ class KoreaInvestmentBroker:
         return 0.0
 
     def get_unfilled_orders(self, ticker):
-        params = {"CANO": self.cano, "ACNT_PRDT_CD": self.acnt_prdt_cd, "OVRS_EXCG_CD": "NASD", "SORT_SQN": "DS", "CTX_AREA_FK100": "", "CTX_AREA_NK100": ""}
+        excg_cd = "AMEX" if ticker == "SOXL" else "NASD"
+        params = {"CANO": self.cano, "ACNT_PRDT_CD": self.acnt_prdt_cd, "OVRS_EXCG_CD": excg_cd, "SORT_SQN": "DS", "CTX_AREA_FK200": "", "CTX_AREA_NK200": ""}
         res = self._call_api("TTTS3018R", "/uapi/overseas-stock/v1/trading/inquire-nccs", "GET", params=params)
         if res.get('rt_cd') == '0':
-            return [item.get('odno') for item in res.get('output', []) if item.get('pdno') == ticker]
+            output = res.get('output', [])
+            if isinstance(output, dict): output = [output]
+            return [item.get('odno') for item in output if item.get('pdno') == ticker]
+        return []
+
+    # 🦇 [V18.4 패치] 스나이퍼 모드용 주문 상세 조회 로직 추가 (주문 방향 등 세부 필드 확보)
+    def get_unfilled_orders_detail(self, ticker):
+        excg_cd = "AMEX" if ticker == "SOXL" else "NASD"
+        params = {"CANO": self.cano, "ACNT_PRDT_CD": self.acnt_prdt_cd, "OVRS_EXCG_CD": excg_cd, "SORT_SQN": "DS", "CTX_AREA_FK200": "", "CTX_AREA_NK200": ""}
+        res = self._call_api("TTTS3018R", "/uapi/overseas-stock/v1/trading/inquire-nccs", "GET", params=params)
+        if res.get('rt_cd') == '0':
+            output = res.get('output', [])
+            if isinstance(output, dict): output = [output]
+            return [item for item in output if item.get('pdno') == ticker]
         return []
 
     def cancel_all_orders_safe(self, ticker):
@@ -245,7 +257,7 @@ class KoreaInvestmentBroker:
             "PDNO": ticker, "ORGN_ODNO": order_id, "RVSE_CNCL_DVSN_CD": "02",
             "ORD_QTY": "0", "OVRS_ORD_UNPR": "0", "ORD_SVR_DVSN_CD": "0"
         }
-        self._call_api("TTTS1004U", "/uapi/overseas-stock/v1/trading/order-rvsecncl", "POST", body=body)
+        self._call_api("TTTT1004U", "/uapi/overseas-stock/v1/trading/order-rvsecncl", "POST", body=body)
 
     def get_execution_history(self, ticker, start_date, end_date):
         excg_cd = "AMEX" if ticker == "SOXL" else "NASD"

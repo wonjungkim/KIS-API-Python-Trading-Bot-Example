@@ -142,7 +142,6 @@ class InfiniteStrategy:
             can_buy = not is_money_short and not is_last_lap
             is_turbo_active = False if force_turbo_off else self.cfg.get_turbo_mode()
             
-            # 🌟 [V17.8 패치] 자전거래 원천 차단: 평단가와 별값 중 낮은 가격을 절대 상한선(Safe Ceiling)으로 설정
             safe_ceiling = min(avg_price, star_price) if star_price > 0 else avg_price
 
             if is_turbo_active and not is_last_lap:
@@ -158,7 +157,6 @@ class InfiniteStrategy:
             N = math.floor(one_portion_amt / avg_price) if avg_price > 0 else 0
             
             if can_buy:
-                # 🌟 [V17.8 패치] 평단 매수도 절대 상한선을 넘지 못하게 제한
                 p_avg = round(min(self._ceil(avg_price) - 0.01, safe_ceiling - 0.01), 2)
                 p_star = round(star_price - 0.01, 2)
 
@@ -189,7 +187,6 @@ class InfiniteStrategy:
                 for i in range(1, 6):
                     target_qty = base_qty_for_jupjup + i 
                     raw_jup_price = self._floor(one_portion_amt / target_qty)
-                    # 🌟 [V17.8 패치] 줍줍 가격도 절대 상한선을 넘지 못하게 제한
                     capped_jup_price = min(raw_jup_price, safe_ceiling - 0.01)
                     jup_price = round(capped_jup_price, 2)
                     if jup_price > 0:
@@ -205,8 +202,8 @@ class InfiniteStrategy:
                 core_orders.append({"side": "SELL", "price": 0, "qty": q_qty, "type": "MOC", "desc": "🛡️쿼터MOC"})
             else:
                 if star_price > 0:
-                    if version == "V17" and star_price > avg_price:
-                        core_orders.append({"side": "SELL", "price": star_price, "qty": q_qty, "type": "LIMIT", "desc": "🦇시크릿지정가"})
+                    if version == "V17":
+                        core_orders.append({"side": "SELL", "price": star_price, "qty": q_qty, "type": "LOC", "desc": "🦇시크릿방어"})
                     else:
                         core_orders.append({"side": "SELL", "price": star_price, "qty": q_qty, "type": "LOC", "desc": "🌟쿼터매도"})
 

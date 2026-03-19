@@ -1,3 +1,7 @@
+# ==========================================================
+# [telegram_bot.py]
+# ⚠️ 이 주석 및 파일명 표기는 절대 지우지 마세요.
+# ==========================================================
 import logging
 import datetime
 import pytz
@@ -95,7 +99,7 @@ class TelegramController:
         
         if ticker in active_tickers:
             self.cfg.set_version(ticker, "V17")
-            await update.message.reply_text(f"🦇 쉿! <b>[{ticker}] 나만의 시크릿 V17 모드</b>가 은밀하게 활성화되었습니다.", parse_mode='HTML')
+            await update.message.reply_text(f"🦇 쉿! <b>[{ticker}] 나만의 시크릿 V17 모드(스나이퍼 어쌔신)</b>가 은밀하게 활성화되었습니다.", parse_mode='HTML')
         else:
             await update.message.reply_text(f"❌ 현재 운용 중인 종목이 아닙니다. (운용 중: {', '.join(active_tickers)})")
 
@@ -150,7 +154,7 @@ class TelegramController:
                 'turbo_txt': "ON" if self.cfg.get_turbo_mode() else "OFF",
                 'target': self.cfg.get_target_profit(t), 'star_pct': round(plan.get('star_ratio', 0) * 100, 2) if 'star_ratio' in plan else 0.0,
                 'seed': seed, 'one_portion': plan.get('one_portion', 0.0), 'plan': plan,
-                'is_locked': self.cfg.check_lock(t, "REG"), 'mode': "REG",
+                'is_locked': self.cfg.check_lock(t, "REG") or self.cfg.check_lock(t, "SNIPER"), 'mode': "REG",
                 'is_reverse': plan.get('is_reverse', False), 'star_price': plan.get('star_price', 0.0),
                 'escrow': self.cfg.get_escrow_cash(t) 
             })
@@ -214,8 +218,6 @@ class TelegramController:
                     if curr_p > 0 and actual_avg > 0:
                         curr_ret = (curr_p - actual_avg) / actual_avg * 100.0
                         
-                        # 🚀 [V18.3 패치] exit_target이 0.0(본전 탈출)일 때 기본값으로 덮어씌워버리는 버그 수정
-                        # strategy.py가 의도적으로 설정한 0.0을 그대로 존중하도록 수정했습니다.
                         exit_target = rev_state.get("exit_target", 0.0) 
                         
                         if curr_ret >= exit_target:
@@ -588,13 +590,13 @@ class TelegramController:
                     is_success = res.get('rt_cd') == '0'
                     if not is_success: all_success = False
                     msg += f"└ 1차 필수: {o['desc']} {o['qty']}주: {'✅' if is_success else f'❌({res.get('msg1')})'}\n"
-                    await asyncio.sleep(0.2) # 🚀 [V18.0] API Throttle 방어
+                    await asyncio.sleep(0.2) 
                     
                 for o in plan.get('bonus_orders', []):
                     res = self.broker.send_order(t, o['side'], o['qty'], o['price'], o['type'])
                     is_success = res.get('rt_cd') == '0'
                     msg += f"└ 2차 보너스: {o['desc']} {o['qty']}주: {'✅' if is_success else '❌(잔금패스)'}\n"
-                    await asyncio.sleep(0.2) # 🚀 [V18.0] API Throttle 방어
+                    await asyncio.sleep(0.2) 
                 
                 if all_success and len(plan.get('core_orders', [])) > 0:
                     self.cfg.set_lock(t, "REG")
