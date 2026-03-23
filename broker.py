@@ -333,6 +333,22 @@ class KoreaInvestmentBroker:
             return not any(o.get('sll_buy_dvsn_cd') == '01' for o in final_orders)
         return not bool(final_orders)
 
+    def cancel_targeted_orders(self, ticker, side, target_ord_dvsn):
+        # 🚨 [무지성 일괄 취소 버그 방어 박제 - V20.11]
+        # 과거 cancel_all_orders_safe는 스나이퍼 격발 시 기존에 깔아둔 다른 방어 주문들까지 핵폭탄처럼 날려버리는 원형탈모 버그가 있었습니다.
+        # 이 함수는 외과 수술처럼 '목표한 타입(LOC: 34 또는 LIMIT: 00)'의 주문만 정확히 색출하여 정밀 타격(취소)합니다. (절대 삭제 금지)
+        sll_buy_cd = '02' if side == "BUY" else '01'
+        orders = self.get_unfilled_orders_detail(ticker)
+        if not orders: return 0
+        
+        target_orders = [o for o in orders if o.get('sll_buy_dvsn_cd') == sll_buy_cd and o.get('ord_dvsn_cd') == target_ord_dvsn]
+        
+        for o in target_orders:
+            self.cancel_order(ticker, o.get('odno'))
+            time.sleep(0.3)
+            
+        return len(target_orders)
+
     def send_order(self, ticker, side, qty, price, order_type="LIMIT"):
         tr_id = "TTTT1002U" if side == "BUY" else "TTTT1006U"
         excg_cd = self._get_exchange_code(ticker, target_api="ORDER")
@@ -352,7 +368,16 @@ class KoreaInvestmentBroker:
             "ORD_SVR_DVSN_CD": "0", "ORD_DVSN": ord_dvsn 
         }
         res = self._call_api(tr_id, "/uapi/overseas-stock/v1/trading/order", "POST", body=body)
-        return {'rt_cd': res.get('rt_cd'), 'msg1': res.get('msg1')}
+        
+        # 🚨 [치명적 버그 방어 박제 - V20.11]
+        # 과거 더블 샷(중복 체결) 버그의 원인은 주문 발송 후 API 지연을 무시하고, 단순히 미체결 내역 유무만 맹목적으로 믿고 재장전했기 때문입니다.
+        # 이제 반드시 고유 주문번호(ODNO)를 반환하여, main.py의 재시도 루프에서 해당 번호의 '순수 미체결 잔량'만 정밀 차감 계산하도록 합니다. (절대 삭제 금지)
+        rt_cd = res.get('rt_cd', '999')
+        msg1 = res.get('msg1', '오류')
+        output = res.get('output', {})
+        odno = output.get('ODNO', '') if isinstance(output, dict) else ''
+        
+        return {'rt_cd': rt_cd, 'msg1': msg1, 'odno': odno}
 
     def cancel_order(self, ticker, order_id):
         excg_cd = self._get_exchange_code(ticker, target_api="ORDER")
@@ -493,7 +518,6 @@ class KoreaInvestmentBroker:
     # ==========================================================
     def get_dynamic_sniper_target(self, index_ticker, weight=1.0):
         try:
-            # 1. 1개월치 5분봉 다운로드 (프리/애프터마켓 포함)
             df = yf.download(index_ticker, period='1mo', interval='5m', prepost=True, progress=False)
             if df.empty: 
                 return None
@@ -502,11 +526,8 @@ class KoreaInvestmentBroker:
                 df.columns = df.columns.droplevel(1)
                 
             df.index = df.index.tz_convert('America/New_York')
-            
-            # 2. 노이즈 제거: 04:00(프리장) ~ 16:00(정규장 마감)까지만 필터링
             df = df.between_time('04:00', '16:00')
             
-            # 3. 프리마켓 포함 일봉으로 재조립
             daily_data = []
             for date, group in df.groupby(df.index.date):
                 if group.empty: continue
@@ -518,22 +539,18 @@ class KoreaInvestmentBroker:
                 })
             daily_df = pd.DataFrame(daily_data).set_index('Date')
             
-            # 4. 🚨 [매우 중요] 시간대 보호 기제 (실시간 ATR 오염 방지)
             est = pytz.timezone('America/New_York')
             now_est = datetime.datetime.now(est)
             today_date = now_est.date()
             
-            # 만약 장중(16:00 이전)에 이 코드가 돈다면, '오늘'의 불완전한 데이터는 날려버리고
-            # 완벽히 마감된 '어제(T-1)'까지의 일봉만 사용합니다.
             if now_est.hour < 16:
                 daily_df = daily_df[daily_df.index.date < today_date]
             else:
                 daily_df = daily_df[daily_df.index.date <= today_date]
                 
             if len(daily_df) < 15: 
-                return None # 14일치 데이터가 안 모였으면 계산 포기
+                return None 
                 
-            # 5. TR 및 ATR(5, 14) 계산
             prev_c = daily_df['Close'].shift(1)
             tr = pd.concat([
                 daily_df['High'] - daily_df['Low'],
@@ -544,16 +561,13 @@ class KoreaInvestmentBroker:
             atr_5d = tr.rolling(window=5).mean()
             atr_14d = tr.rolling(window=14).mean()
             
-            # 6. 완벽하게 마감된 마지막 날(T-1)의 데이터 추출
             last_atr_5 = atr_5d.iloc[-1]
             last_atr_14 = atr_14d.iloc[-1]
             last_close = daily_df['Close'].iloc[-1]
             
-            # 7. 3배수 적용
             exp_5d = (last_atr_5 / last_close) * 100 * 3
             exp_14d = (last_atr_14 / last_close) * 100 * 3
             
-            # 8. 하이브리드 조합 및 종목별 가중치(Multiplier) 적용
             hybrid = max(exp_5d, exp_14d * 0.8)
             final_target = hybrid * weight
             

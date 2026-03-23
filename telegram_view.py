@@ -3,6 +3,7 @@
 # ⚠️ 이 주석 및 파일명 표기는 절대 지우지 마세요.
 # ==========================================================
 import os
+import math
 from PIL import Image, ImageDraw, ImageFont
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -67,31 +68,32 @@ class TelegramView:
         return msg, InlineKeyboardMarkup(keyboard)
 
     def get_version_message(self, history_data, page_index=None):
-        groups = {}
-        for h in history_data:
-            ver_str = h if isinstance(h, str) else h.get('version', '')
-            major_ver = ver_str.split('.')[0] if '.' in ver_str else ver_str.split(' ')[0]
-            if major_ver not in groups:
-                groups[major_ver] = []
-            groups[major_ver].append(h)
-            
-        major_versions = list(groups.keys())
-        major_versions.reverse() 
-
-        if not major_versions:
+        if not history_data:
             return "📭 기록된 버전 히스토리가 없습니다.", None
 
+        # 🚨 [V21.0 박제] 텔레그램 4096자 에러 방지용 페이징 슬라이싱
+        # history_data는 과거(index 0)부터 최신(index -1) 순서로 쌓인 단일 파일입니다.
+        items_per_page = 5
+        total_items = len(history_data)
+        total_pages = math.ceil(total_items / items_per_page)
+
         if page_index is None:
-            current_major = major_versions[0]
-            items = groups.get(current_major, [])
-            title = f"🛠️ <b>[ 최신 버전({current_major}) 업데이트 내역 ]</b>\n\n"
+            page_index = 0
         else:
-            page_index = max(0, min(page_index, len(major_versions) - 1))
-            current_major = major_versions[page_index]
-            items = groups.get(current_major, [])
-            title = f"📚 <b>[ 과거 버전({current_major}) 명예의 전당 ]</b>\n\n"
+            page_index = max(0, min(page_index, total_pages - 1))
+
+        # 🎯 끝에서부터 5개씩 슬라이싱 (페이지 0이 가장 최신 구간)
+        end_idx = total_items - (page_index * items_per_page)
+        start_idx = max(0, end_idx - items_per_page)
+        items = history_data[start_idx:end_idx]
+
+        if page_index == 0:
+            title = "🛠️ <b>[ 최신 업데이트 내역 ]</b>\n\n"
+        else:
+            title = f"📚 <b>[ 과거 업데이트 내역 (Page {page_index + 1}/{total_pages}) ]</b>\n\n"
 
         msg = title
+        # 슬라이싱된 5개 아이템은 자연스럽게 '위가 약간 과거, 아래가 가장 최신' 순으로 출력됨
         for h in items:
             if isinstance(h, str):
                 parts = h.split(' ', 2)
@@ -108,24 +110,21 @@ class TelegramView:
         msg = msg.strip()
         keyboard = []
         
-        if page_index is None:
-            if len(major_versions) > 1:
-                keyboard.append([InlineKeyboardButton(f"📜 과거 버전 명예의 전당 보기 ({major_versions[1]})", callback_data="VERSION:PAGE:1")])
-        else:
-            nav_row = []
-            if page_index < len(major_versions) - 1:
-                prev_major = major_versions[page_index + 1]
-                nav_row.append(InlineKeyboardButton(f"◀️ 이전 ({prev_major})", callback_data=f"VERSION:PAGE:{page_index + 1}"))
-            if page_index > 0:
-                next_major = major_versions[page_index - 1]
-                nav_row.append(InlineKeyboardButton(f"다음 ({next_major}) ▶️", callback_data=f"VERSION:PAGE:{page_index - 1}"))
+        nav_row = []
+        if page_index < total_pages - 1:
+            # page_index가 커질수록 과거 구간으로 이동
+            nav_row.append(InlineKeyboardButton("◀️ 과거 기록", callback_data=f"VERSION:PAGE:{page_index + 1}"))
+        if page_index > 0:
+            # page_index가 작아질수록 최신 구간으로 이동
+            nav_row.append(InlineKeyboardButton("최신 기록 ▶️", callback_data=f"VERSION:PAGE:{page_index - 1}"))
             
-            if nav_row:
-                keyboard.append(nav_row)
+        if nav_row:
+            keyboard.append(nav_row)
             
+        if page_index > 0:
             keyboard.append([InlineKeyboardButton("⬆️ 접기 (최신 버전만 보기)", callback_data="VERSION:LATEST")])
             
-        return msg, InlineKeyboardMarkup(keyboard)
+        return msg, InlineKeyboardMarkup(keyboard) if keyboard else None
 
     def create_sync_report(self, status_text, dst_text, cash, rp_amount, ticker_data, is_trade_active):
         total_locked = sum(t_info.get('escrow', 0.0) for t_info in ticker_data)
@@ -358,7 +357,6 @@ class TelegramView:
         
         draw.text((W/2, H - 40), f"Graduation Date: {end_date}", font=f_b, fill="#636366", anchor="mm")
         
-        # 🔥 V20.10 졸업 이미지 무한 덮어쓰기 로직 적용 완료
         fname = f"data/profit_{ticker}.png"
         img.save(fname)
         return fname
@@ -370,4 +368,3 @@ class TelegramView:
             [InlineKeyboardButton("💎 SOXL + TQQQ 통합", callback_data="TICKER:ALL")]
         ]
         return f"🔄 <b>[ 운용 종목 선택 ]</b>\n현재: <b>{', '.join(current_tickers)}</b>", InlineKeyboardMarkup(keyboard)
-
