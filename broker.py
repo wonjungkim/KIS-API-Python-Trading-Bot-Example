@@ -1,4 +1,7 @@
-# 파일명: broker.py
+# ==========================================================
+# [broker.py]
+# ⚠️ 이 주석 및 파일명 표기는 절대 지우지 마세요.
+# ==========================================================
 import requests
 import json
 import time
@@ -6,21 +9,24 @@ import datetime
 import os
 import math
 import yfinance as yf
+import pytz
+import tempfile
+import pandas as pd   # 🔥 V20 추가: 동적 타점 계산용
+import numpy as np    # 🔥 V20 추가: 동적 타점 계산용
 
 class KoreaInvestmentBroker:
-    # 브로커 객체 초기화 (앱키, 시크릿키, 계좌번호 등 세팅)
     def __init__(self, app_key, app_secret, cano, acnt_prdt_cd="01"):
         self.app_key = app_key
         self.app_secret = app_secret
         self.cano = cano
         self.acnt_prdt_cd = acnt_prdt_cd
         self.base_url = "https://openapi.koreainvestment.com:9443"
-        # [V14.2] 토큰 파일을 data/ 폴더 하위에 생성하도록 변경
         self.token_file = f"data/token_{cano}.dat" 
         self.token = None
+        self._excg_cd_cache = {} 
+        
         self._get_access_token()
 
-    # KIS API 통신용 Oauth2 인증 토큰을 발급받거나 파일에서 불러옵니다.
     def _get_access_token(self, force=False):
         if not force and os.path.exists(self.token_file):
             try:
@@ -30,30 +36,36 @@ class KoreaInvestmentBroker:
                 if expire_time > datetime.datetime.now() + datetime.timedelta(hours=1):
                     self.token = saved['token']
                     return
-            except: pass
+            except Exception: pass
 
         if force and os.path.exists(self.token_file):
             try: os.remove(self.token_file)
-            except: pass
+            except Exception: pass
 
         url = f"{self.base_url}/oauth2/tokenP"
         body = {"grant_type": "client_credentials", "appkey": self.app_key, "appsecret": self.app_secret}
         
         try:
-            res = requests.post(url, headers={"content-type": "application/json"}, data=json.dumps(body))
+            res = requests.post(url, headers={"content-type": "application/json"}, data=json.dumps(body), timeout=10)
             data = res.json()
             if 'access_token' in data:
                 self.token = data['access_token']
                 expire_str = (datetime.datetime.now() + datetime.timedelta(seconds=int(data['expires_in']))).strftime('%Y-%m-%d %H:%M:%S')
                 
-                with open(self.token_file, 'w') as f:
+                dir_name = os.path.dirname(self.token_file)
+                if dir_name and not os.path.exists(dir_name):
+                    os.makedirs(dir_name, exist_ok=True)
+                fd, temp_path = tempfile.mkstemp(dir=dir_name, text=True)
+                with os.fdopen(fd, 'w', encoding='utf-8') as f:
                     json.dump({'token': self.token, 'expire': expire_str}, f)
+                    f.flush()
+                    os.fsync(fd)
+                os.replace(temp_path, self.token_file)
             else:
                 print(f"❌ [Broker] 토큰 발급 실패: {data.get('error_description', '알 수 없는 오류')}")
         except Exception as e:
             print(f"❌ [Broker] 토큰 통신 에러: {e}")
 
-    # API 호출용 공통 헤더를 생성합니다.
     def _get_header(self, tr_id):
         return {
             "content-type": "application/json; charset=utf-8",
@@ -64,14 +76,13 @@ class KoreaInvestmentBroker:
             "custtype": "P"
         }
 
-    # 🛡️ [V15.2 안전장치] API 통신 중 토큰 만료(또는 오류) 발생 시 자동 감지 및 강제 재발급 후 재시도하는 래퍼 함수
     def _api_request(self, method, url, headers, params=None, data=None):
         for attempt in range(2): 
             try:
                 if method.upper() == "GET":
-                    res = requests.get(url, headers=headers, params=params)
+                    res = requests.get(url, headers=headers, params=params, timeout=10)
                 else:
-                    res = requests.post(url, headers=headers, data=json.dumps(data) if data else None)
+                    res = requests.post(url, headers=headers, data=json.dumps(data) if data else None, timeout=10)
                     
                 resp_json = res.json()
                 
@@ -104,7 +115,48 @@ class KoreaInvestmentBroker:
 
     def _safe_float(self, value):
         try: return float(str(value).replace(',', ''))
-        except: return 0.0
+        except Exception: return 0.0
+
+    def _get_exchange_code(self, ticker, target_api="PRICE"):
+        if ticker in self._excg_cd_cache:
+            codes = self._excg_cd_cache[ticker]
+            return codes['PRICE'] if target_api == "PRICE" else codes['ORDER']
+
+        price_cd = "NAS"
+        order_cd = "NASD"
+        dynamic_success = False
+
+        try:
+            for prdt_type in ["512", "513", "529"]:
+                params = {
+                    "PRDT_TYPE_CD": prdt_type,
+                    "PDNO": ticker
+                }
+                res = self._call_api("CTPF1702R", "/uapi/overseas-price/v1/quotations/search-info", "GET", params=params)
+                
+                if res.get('rt_cd') == '0' and res.get('output'):
+                    excg_name = str(res['output'].get('ovrs_excg_cd', '')).upper()
+                    if "NASD" in excg_name or "NASDAQ" in excg_name:
+                        price_cd, order_cd = "NAS", "NASD"
+                        dynamic_success = True
+                        break
+                    elif "NYSE" in excg_name or "NEW YORK" in excg_name:
+                        price_cd, order_cd = "NYS", "NYSE"
+                        dynamic_success = True
+                        break
+                    elif "AMEX" in excg_name:
+                        price_cd, order_cd = "AMS", "AMEX"
+                        dynamic_success = True
+                        break
+        except Exception as e:
+            print(f"⚠️ [Broker] 거래소 코드 동적 획득 실패: {ticker} - {e}")
+
+        if not dynamic_success:
+            if ticker == "SOXL": price_cd, order_cd = "AMS", "AMEX"
+            elif ticker == "TQQQ": price_cd, order_cd = "NAS", "NASD"
+
+        self._excg_cd_cache[ticker] = {'PRICE': price_cd, 'ORDER': order_cd}
+        return price_cd if target_api == "PRICE" else order_cd
 
     def get_account_balance(self):
         cash = 0.0
@@ -124,23 +176,28 @@ class KoreaInvestmentBroker:
             raw_bp = dncl_amt + sll_amt - buy_amt
             cash = math.floor((raw_bp * 0.9945) * 100) / 100.0              
 
-        params_hold = {"CANO": self.cano, "ACNT_PRDT_CD": self.acnt_prdt_cd, "OVRS_EXCG_CD": "NASD", "TR_CRCY_CD": "USD", "CTX_AREA_FK200": "", "CTX_AREA_NK200": ""}
-        res = self._call_api("TTTS3012R", "/uapi/overseas-stock/v1/trading/inquire-balance", "GET", params_hold)
+        holdings = {}
+        target_excgs = ["NASD", "AMEX", "NYSE"] 
         
-        if res.get('rt_cd') == '0':
-            holdings = {} 
-            if cash <= 0:
-                o2 = res.get('output2', {})
-                if isinstance(o2, list) and len(o2) > 0: o2 = o2[0]
-                cash = self._safe_float(o2.get('ovrs_ord_psbl_amt', 0))
+        for excg in target_excgs:
+            params_hold = {"CANO": self.cano, "ACNT_PRDT_CD": self.acnt_prdt_cd, "OVRS_EXCG_CD": excg, "TR_CRCY_CD": "USD", "CTX_AREA_FK200": "", "CTX_AREA_NK200": ""}
+            res_hold = self._call_api("TTTS3012R", "/uapi/overseas-stock/v1/trading/inquire-balance", "GET", params_hold)
             
-            for item in res.get('output1', []):
-                ticker = item.get('ovrs_pdno')
-                qty = int(self._safe_float(item.get('ovrs_cblc_qty', 0)))
-                avg = self._safe_float(item.get('pchs_avg_pric', 0))
-                if qty > 0: holdings[ticker] = {'qty': qty, 'avg': avg}
+            if res_hold.get('rt_cd') == '0':
+                if cash <= 0:
+                    o2 = res_hold.get('output2', {})
+                    if isinstance(o2, list) and len(o2) > 0: o2 = o2[0]
+                    new_cash = self._safe_float(o2.get('ovrs_ord_psbl_amt', 0))
+                    if new_cash > cash: cash = new_cash
+                
+                for item in res_hold.get('output1', []):
+                    ticker = item.get('ovrs_pdno')
+                    qty = int(self._safe_float(item.get('ovrs_cblc_qty', 0)))
+                    avg = self._safe_float(item.get('pchs_avg_pric', 0))
+                    if qty > 0 and ticker not in holdings: 
+                        holdings[ticker] = {'qty': qty, 'avg': avg}
         
-        return cash, holdings
+        return cash, holdings if holdings else None
 
     def get_current_price(self, ticker, is_market_closed=False):
         try:
@@ -150,65 +207,135 @@ class KoreaInvestmentBroker:
             if not hist.empty: return float(hist['Close'].iloc[-1])
             else: return float(stock.fast_info['last_price'])
         except Exception as e:
-            return 0.0
+            print(f"⚠️ [야후 파이낸스] 현재가 에러, 한투 API 우회 가동: {e}")
 
-    def get_historical_close_prices(self, ticker, date_str):
         try:
-            if len(date_str) == 8 and date_str.isdigit():
-                date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
-                
-            stock = yf.Ticker(ticker)
-            start_date = datetime.datetime.strptime(date_str, '%Y-%m-%d')
-            end_date = start_date + datetime.timedelta(days=1)
-            
-            daily_df = stock.history(start=start_date.strftime('%Y-%m-%d'), end=end_date.strftime('%Y-%m-%d'), interval="1d")
-            if daily_df.empty: return 0.0
-            return round(float(daily_df['Close'].iloc[-1]), 2)
+            excg_cd = self._get_exchange_code(ticker, target_api="PRICE")
+            params = {"AUTH": "", "EXCD": excg_cd, "SYMB": ticker}
+            res = self._call_api("HHDFS76200200", "/uapi/overseas-price/v1/quotations/price", "GET", params=params)
+            if res.get('rt_cd') == '0':
+                return float(res.get('output', {}).get('last', 0.0))
         except Exception as e:
-            return 0.0
+            print(f"❌ [한투 API] 현재가 우회 조회 실패: {e}")
+        return 0.0
+        
+    def get_ask_price(self, ticker):
+        try:
+            excg_cd = self._get_exchange_code(ticker, target_api="PRICE")
+            params = {"AUTH": "", "EXCD": excg_cd, "SYMB": ticker}
+            res = self._call_api("HHDFS76200100", "/uapi/overseas-price/v1/quotations/inquire-asking-price", "GET", params=params)
+            if res.get('rt_cd') == '0':
+                output2 = res.get('output2', [])
+                if isinstance(output2, list) and len(output2) > 0:
+                    return float(output2[0].get('pask1', 0.0))
+                elif isinstance(output2, dict):
+                    return float(output2.get('pask1', 0.0))
+        except Exception as e:
+            print(f"❌ [한투 API] 매도 1호가 조회 실패: {e}")
+        return 0.0
+
+    def get_bid_price(self, ticker):
+        try:
+            excg_cd = self._get_exchange_code(ticker, target_api="PRICE")
+            params = {"AUTH": "", "EXCD": excg_cd, "SYMB": ticker}
+            res = self._call_api("HHDFS76200100", "/uapi/overseas-price/v1/quotations/inquire-asking-price", "GET", params=params)
+            if res.get('rt_cd') == '0':
+                output2 = res.get('output2', [])
+                if isinstance(output2, list) and len(output2) > 0:
+                    return float(output2[0].get('pbid1', 0.0))
+                elif isinstance(output2, dict):
+                    return float(output2.get('pbid1', 0.0))
+        except Exception as e:
+            print(f"❌ [한투 API] 매수 1호가 조회 실패: {e}")
+        return 0.0
 
     def get_previous_close(self, ticker):
-        try: return yf.Ticker(ticker).fast_info['previous_close']
-        except: return 0.0
+        try: return float(yf.Ticker(ticker).fast_info['previous_close'])
+        except Exception as e:
+            print(f"⚠️ [야후 파이낸스] 전일종가 에러, 한투 API 우회 가동: {e}")
+
+        try:
+            excg_cd = self._get_exchange_code(ticker, target_api="PRICE")
+            params = {"AUTH": "", "EXCD": excg_cd, "SYMB": ticker}
+            res = self._call_api("HHDFS76200200", "/uapi/overseas-price/v1/quotations/price", "GET", params=params)
+            if res.get('rt_cd') == '0':
+                return float(res.get('output', {}).get('base', 0.0))
+        except Exception as e:
+            print(f"❌ [한투 API] 전일종가 우회 조회 실패: {e}")
+        return 0.0
 
     def get_5day_ma(self, ticker):
         try:
             stock = yf.Ticker(ticker)
             hist = stock.history(period="10d") 
             if len(hist) >= 5: return float(hist['Close'][-5:].mean())
-            return 0.0
-        except: return 0.0
-
-    def check_recent_split(self, ticker):
+        except Exception as e:
+            print(f"⚠️ [야후 파이낸스] MA5 에러, 한투 API 우회 가동: {e}")
+            
         try:
-            stock = yf.Ticker(ticker)
-            splits = stock.splits
-            if not splits.empty:
-                splits.index = splits.index.tz_localize(None)
-                thirty_days_ago = datetime.datetime.now() - datetime.timedelta(days=30)
-                recent_splits = splits[splits.index >= thirty_days_ago]
-                if not recent_splits.empty: return float(recent_splits.iloc[-1])
-        except Exception as e: pass
+            excg_cd = self._get_exchange_code(ticker, target_api="PRICE")
+            params = {
+                "AUTH": "", "EXCD": excg_cd, "SYMB": ticker,
+                "GUBN": "0", "BYMD": "", "MODP": "1"
+            }
+            res = self._call_api("HHDFS76240000", "/uapi/overseas-price/v1/quotations/dailyprice", "GET", params=params)
+            if res.get('rt_cd') == '0':
+                output2 = res.get('output2', [])
+                if isinstance(output2, list) and len(output2) >= 5:
+                    closes = [float(x['clos']) for x in output2[:5]]
+                    return sum(closes) / len(closes)
+        except Exception as e:
+            print(f"❌ [한투 API] MA5 우회 조회 실패: {e}")
+            
         return 0.0
 
     def get_unfilled_orders(self, ticker):
-        params = {"CANO": self.cano, "ACNT_PRDT_CD": self.acnt_prdt_cd, "OVRS_EXCG_CD": "NASD", "SORT_SQN": "DS", "CTX_AREA_FK100": "", "CTX_AREA_NK100": ""}
+        excg_cd = self._get_exchange_code(ticker, target_api="ORDER")
+        params = {"CANO": self.cano, "ACNT_PRDT_CD": self.acnt_prdt_cd, "OVRS_EXCG_CD": excg_cd, "SORT_SQN": "DS", "CTX_AREA_FK200": "", "CTX_AREA_NK200": ""}
         res = self._call_api("TTTS3018R", "/uapi/overseas-stock/v1/trading/inquire-nccs", "GET", params=params)
         if res.get('rt_cd') == '0':
-            return [item.get('odno') for item in res.get('output', []) if item.get('pdno') == ticker]
+            output = res.get('output', [])
+            if isinstance(output, dict): output = [output]
+            return [item.get('odno') for item in output if item.get('pdno') == ticker]
         return []
 
-    def cancel_all_orders_safe(self, ticker):
+    def get_unfilled_orders_detail(self, ticker):
+        excg_cd = self._get_exchange_code(ticker, target_api="ORDER")
+        params = {"CANO": self.cano, "ACNT_PRDT_CD": self.acnt_prdt_cd, "OVRS_EXCG_CD": excg_cd, "SORT_SQN": "DS", "CTX_AREA_FK200": "", "CTX_AREA_NK200": ""}
+        res = self._call_api("TTTS3018R", "/uapi/overseas-stock/v1/trading/inquire-nccs", "GET", params=params)
+        if res.get('rt_cd') == '0':
+            output = res.get('output', [])
+            if isinstance(output, dict): output = [output]
+            return [item for item in output if item.get('pdno') == ticker]
+        return []
+
+    def cancel_all_orders_safe(self, ticker, side=None):
         for i in range(3):
-            orders = self.get_unfilled_orders(ticker)
+            orders = self.get_unfilled_orders_detail(ticker)
             if not orders: return True
-            for oid in orders: self.cancel_order(ticker, oid)
+            
+            target_orders = orders
+            if side == "BUY":
+                target_orders = [o for o in orders if o.get('sll_buy_dvsn_cd') == '02']
+            elif side == "SELL":
+                target_orders = [o for o in orders if o.get('sll_buy_dvsn_cd') == '01']
+                
+            if not target_orders: return True
+            
+            for o in target_orders: 
+                self.cancel_order(ticker, o.get('odno'))
             time.sleep(5)
-        return not bool(self.get_unfilled_orders(ticker))
+            
+        final_orders = self.get_unfilled_orders_detail(ticker)
+        if side == "BUY":
+            return not any(o.get('sll_buy_dvsn_cd') == '02' for o in final_orders)
+        elif side == "SELL":
+            return not any(o.get('sll_buy_dvsn_cd') == '01' for o in final_orders)
+        return not bool(final_orders)
 
     def send_order(self, ticker, side, qty, price, order_type="LIMIT"):
         tr_id = "TTTT1002U" if side == "BUY" else "TTTT1006U"
-        excg_cd = "AMEX" if ticker == "SOXL" else "NASD"
+        excg_cd = self._get_exchange_code(ticker, target_api="ORDER")
 
         if order_type == "LOC": ord_dvsn = "34"
         elif order_type == "MOC": ord_dvsn = "33"
@@ -228,17 +355,18 @@ class KoreaInvestmentBroker:
         return {'rt_cd': res.get('rt_cd'), 'msg1': res.get('msg1')}
 
     def cancel_order(self, ticker, order_id):
-        excg_cd = "AMEX" if ticker == "SOXL" else "NASD"
+        excg_cd = self._get_exchange_code(ticker, target_api="ORDER")
         body = {
             "CANO": self.cano, "ACNT_PRDT_CD": self.acnt_prdt_cd, "OVRS_EXCG_CD": excg_cd,
             "PDNO": ticker, "ORGN_ODNO": order_id, "RVSE_CNCL_DVSN_CD": "02",
             "ORD_QTY": "0", "OVRS_ORD_UNPR": "0", "ORD_SVR_DVSN_CD": "0"
         }
-        self._call_api("TTTS1004U", "/uapi/overseas-stock/v1/trading/order-rvsecncl", "POST", body=body)
+        self._call_api("TTTT1004U", "/uapi/overseas-stock/v1/trading/order-rvsecncl", "POST", body=body)
 
     def get_execution_history(self, ticker, start_date, end_date):
-        excg_cd = "AMEX" if ticker == "SOXL" else "NASD"
+        excg_cd = self._get_exchange_code(ticker, target_api="ORDER")
         valid_execs = []
+        seen_keys = set()
         fk200 = ""
         nk200 = ""
         
@@ -259,7 +387,10 @@ class KoreaInvestmentBroker:
                 if isinstance(output, dict): output = [output] 
                 for item in output:
                     if float(item.get('ft_ccld_qty', '0')) > 0:
-                        valid_execs.append(item)
+                        unique_key = f"{item.get('odno')}_{item.get('ord_tmd')}_{item.get('ft_ccld_qty')}_{item.get('ft_ccld_unpr3')}"
+                        if unique_key not in seen_keys:
+                            seen_keys.add(unique_key)
+                            valid_execs.append(item)
                         
                 tr_cont = res.headers.get('tr_cont', '')
                 fk200 = resp_json.get('ctx_area_fk200', '').strip()
@@ -275,7 +406,6 @@ class KoreaInvestmentBroker:
                 break
         return valid_execs
 
-    # 🚀 [V15.7] 제네시스 역산 엔진 (액면분할 대비 서킷 브레이커 탑재)
     def get_genesis_ledger(self, ticker, limit_date_str=None):
         _, holdings = self.get_account_balance()
         if holdings is None: return None, 0, 0.0
@@ -288,15 +418,17 @@ class KoreaInvestmentBroker:
         if curr_qty == 0: return [], 0, 0.0
             
         ledger_records = []
-        target_date = datetime.datetime.now()
+        est = pytz.timezone('US/Eastern')
+        target_date = datetime.datetime.now(est)
         genesis_reached = False
+        loop_counter = 0 
         
-        while curr_qty > 0 and not genesis_reached:
+        while curr_qty > 0 and not genesis_reached and loop_counter < 365:
+            loop_counter += 1
             date_str = target_date.strftime('%Y%m%d')
             
-            # 액면분할 방어 서킷 브레이커: 스냅샷 기준 날짜를 넘어 과거로 갔는데도 수량이 남아있으면 중단
             if limit_date_str and date_str < limit_date_str:
-                return "CIRCUIT_BREAKER", final_qty, final_avg
+                break 
                 
             execs = self.get_execution_history(ticker, date_str, date_str)
             
@@ -307,18 +439,16 @@ class KoreaInvestmentBroker:
                     exec_qty = int(float(ex.get('ft_ccld_qty', '0')))
                     exec_price = float(ex.get('ft_ccld_unpr3', '0'))
                     
-                    # 💡 [V15.4] 오버슈팅(Overshoot) 절단 로직
-                    # 이전 사이클의 물량까지 긁어와서 장부를 오염시키는 무한루프 버그를 원천 차단합니다.
                     record_qty = exec_qty
                     
-                    if side_cd == "02": # 매수 (과거로 가며 차감)
+                    if side_cd == "02": 
                         if curr_qty <= exec_qty: 
-                            record_qty = curr_qty # 남은 수량만큼만 딱 맞게 잘라서 기록!
+                            record_qty = curr_qty 
                             curr_qty = 0
                             genesis_reached = True
                         else:
                             curr_qty -= exec_qty
-                    else: # 매도 (과거로 가며 더함)
+                    else: 
                         curr_qty += exec_qty
                     
                     ledger_records.append({
@@ -333,7 +463,102 @@ class KoreaInvestmentBroker:
                         
             target_date -= datetime.timedelta(days=1)
             time.sleep(0.1) 
-            if (datetime.datetime.now() - target_date).days > 365: break 
                 
         ledger_records.reverse()
         return ledger_records, final_qty, final_avg
+
+    def get_recent_stock_split(self, ticker, last_date_str):
+        try:
+            stock = yf.Ticker(ticker)
+            splits = stock.splits
+            if splits is not None and not splits.empty:
+                
+                if last_date_str == "":
+                    est = pytz.timezone('US/Eastern')
+                    seven_days_ago = datetime.datetime.now(est) - datetime.timedelta(days=7)
+                    safe_last_date = seven_days_ago.strftime('%Y-%m-%d')
+                else:
+                    safe_last_date = last_date_str
+                    
+                for split_date_dt, ratio in splits.items():
+                    split_date = split_date_dt.strftime('%Y-%m-%d')
+                    if split_date > safe_last_date:
+                        return float(ratio), split_date
+        except Exception as e:
+            print(f"⚠️ [야후 파이낸스] 액면분할 조회 에러: {e}")
+        return 0.0, ""
+
+    # ==========================================================
+    # 🔥 V20 핵심 심장: 프리마켓 통합 동적 하이브리드 타점 계산 엔진
+    # ==========================================================
+    def get_dynamic_sniper_target(self, index_ticker, weight=1.0):
+        try:
+            # 1. 1개월치 5분봉 다운로드 (프리/애프터마켓 포함)
+            df = yf.download(index_ticker, period='1mo', interval='5m', prepost=True, progress=False)
+            if df.empty: 
+                return None
+            
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.droplevel(1)
+                
+            df.index = df.index.tz_convert('America/New_York')
+            
+            # 2. 노이즈 제거: 04:00(프리장) ~ 16:00(정규장 마감)까지만 필터링
+            df = df.between_time('04:00', '16:00')
+            
+            # 3. 프리마켓 포함 일봉으로 재조립
+            daily_data = []
+            for date, group in df.groupby(df.index.date):
+                if group.empty: continue
+                daily_data.append({
+                    'Date': pd.to_datetime(date),
+                    'High': group['High'].max(),
+                    'Low': group['Low'].min(),
+                    'Close': group['Close'].iloc[-1]
+                })
+            daily_df = pd.DataFrame(daily_data).set_index('Date')
+            
+            # 4. 🚨 [매우 중요] 시간대 보호 기제 (실시간 ATR 오염 방지)
+            est = pytz.timezone('America/New_York')
+            now_est = datetime.datetime.now(est)
+            today_date = now_est.date()
+            
+            # 만약 장중(16:00 이전)에 이 코드가 돈다면, '오늘'의 불완전한 데이터는 날려버리고
+            # 완벽히 마감된 '어제(T-1)'까지의 일봉만 사용합니다.
+            if now_est.hour < 16:
+                daily_df = daily_df[daily_df.index.date < today_date]
+            else:
+                daily_df = daily_df[daily_df.index.date <= today_date]
+                
+            if len(daily_df) < 15: 
+                return None # 14일치 데이터가 안 모였으면 계산 포기
+                
+            # 5. TR 및 ATR(5, 14) 계산
+            prev_c = daily_df['Close'].shift(1)
+            tr = pd.concat([
+                daily_df['High'] - daily_df['Low'],
+                abs(daily_df['High'] - prev_c),
+                abs(daily_df['Low'] - prev_c)
+            ], axis=1).max(axis=1)
+            
+            atr_5d = tr.rolling(window=5).mean()
+            atr_14d = tr.rolling(window=14).mean()
+            
+            # 6. 완벽하게 마감된 마지막 날(T-1)의 데이터 추출
+            last_atr_5 = atr_5d.iloc[-1]
+            last_atr_14 = atr_14d.iloc[-1]
+            last_close = daily_df['Close'].iloc[-1]
+            
+            # 7. 3배수 적용
+            exp_5d = (last_atr_5 / last_close) * 100 * 3
+            exp_14d = (last_atr_14 / last_close) * 100 * 3
+            
+            # 8. 하이브리드 조합 및 종목별 가중치(Multiplier) 적용
+            hybrid = max(exp_5d, exp_14d * 0.8)
+            final_target = hybrid * weight
+            
+            return round(final_target, 2)
+            
+        except Exception as e:
+            print(f"⚠️ [Broker] 동적 스나이퍼 타점 계산 실패 ({index_ticker}): {e}")
+            return None

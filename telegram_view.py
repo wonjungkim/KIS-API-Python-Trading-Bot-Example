@@ -1,4 +1,7 @@
-# 파일명: telegram_view.py
+# ==========================================================
+# [telegram_view.py]
+# ⚠️ 이 주석 및 파일명 표기는 절대 지우지 마세요.
+# ==========================================================
 import os
 from PIL import Image, ImageDraw, ImageFont
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -13,13 +16,9 @@ class TelegramView:
         season_short = "🌞서머타임 ON" if "Summer" in season_icon else "❄️서머타임 OFF"
         sync_time = "08:30" if target_hour == 17 else "09:30"
 
-        # 🚀 [V16.8] 에스크로 락다운 및 긴급수혈 엔진 설명 추가 (방금 누락되었던 부분 복구!)
         return (
             f"🌌 <b>[ 다이내믹 스노우볼 TrueSync {latest_version} ]</b>\n" 
             f"⚡ <b>API 팩트 기반 무결성 동기화 엔진 가동</b> \n\n"
-            f"🛡️ <b>[ V16.x 주요 방어 시스템 ]</b>\n"
-            f"🔒 <b>에스크로 락다운</b>: 리버스 진입 종목의 확보 자금을 가상 금고에 격리하여 타 종목의 예산 탈취를 원천 차단합니다.\n"
-            f"🩸 <b>긴급 수혈 엔진</b>: 에스크로 자금 고갈 시 봇이 스스로 MOC 의무매도를 단행하여 4일 치 생명수(현금)를 자동 창출합니다.\n\n"
             f"🕒 <b>[ 운영 스케줄 ({season_short}) ]</b>\n"
             f"🔹 6시간 간격 : 🔑 API 토큰 자동 갱신\n"
             f"🔹 {sync_time} : 📝 잔고 동기화 & 자동 복리\n"
@@ -30,42 +29,70 @@ class TelegramView:
             "▶️ <b>/sync</b> : 📜 통합 지시서 조회\n"
             "▶️ <b>/record</b> : 📊 장부 동기화 및 조회\n"
             "▶️ <b>/history</b> : 🏆 졸업 명예의 전당\n"
-            "▶️ <b>/settlement</b> : ⚙️ 버전/분할/복리 설정\n"
+            "▶️ <b>/settlement</b> : ⚙️ 분할/복리/액면 설정\n"
             "▶️ <b>/seed</b> : 💵 개별 시드머니 관리\n"
             "▶️ <b>/ticker</b> : 🔄 운용 종목 선택\n"
             "▶️ <b>/mode</b> : 🏎️ 일반/가속 모드 변경\n"
             "▶️ <b>/version</b> : 🛠️ 버전 및 업데이트 내역\n\n" 
-            "⚠️ <b>/reset</b> : 🔓 비상 해제 메뉴 (락/리버스)" 
+            "⚠️ <b>/reset</b> : 🔓 비상 해제 메뉴 (락/리버스)\n" 
+            "<i>┗ 🚨 수동 닻 올리기: 예산 부족으로 리버스 진입 후 외화RP매도 등 예수금을 추가 입금하셨다면, 이 메뉴에서 반드시 '리버스 강제 해제'를 눌러 닻을 올려주세요!</i>"
         )
 
-    def get_reset_menu(self):
+    def get_reset_menu(self, active_tickers):
         msg = (
             "🛠️ <b>[ 시스템 안전 통제실 ]</b>\n"
             "⚠️ 주의: 강제 초기화할 항목을 선택하세요."
         )
-        keyboard = [
-            [InlineKeyboardButton("🔓 금일 매매 잠금(Lock) 해제", callback_data="RESET:LOCKS")],
-            [InlineKeyboardButton("🚨 SOXL 리버스 강제 해제", callback_data="RESET:REV:SOXL")],
-            [InlineKeyboardButton("🚨 TQQQ 리버스 강제 해제", callback_data="RESET:REV:TQQQ")],
-            [InlineKeyboardButton("❌ 취소 및 닫기", callback_data="RESET:CANCEL")]
-        ]
+        keyboard = []
+        
+        for t in active_tickers:
+            keyboard.append([InlineKeyboardButton(f"🔓 [{t}] 매매 잠금 해제", callback_data=f"RESET:LOCK:{t}")])
+            
+        for t in active_tickers:
+            keyboard.append([InlineKeyboardButton(f"🚨 [{t}] 리버스/장부 초기화", callback_data=f"RESET:REV:{t}")])
+            
+        keyboard.append([InlineKeyboardButton("❌ 취소 및 닫기", callback_data="RESET:CANCEL")])
         return msg, InlineKeyboardMarkup(keyboard)
 
     def get_reset_confirm_menu(self, ticker):
         msg = (
-            f"⚠️ <b>[ 경고: {ticker} 리버스 모드 해제 ]</b>\n\n"
-            f"정말로 {ticker}의 리버스 모드를 강제로 종료하시겠습니까?\n"
-            "<i>(충분한 시드가 추가되었을 때만 권장하며, 해제 시 다음부터 일반 모드로 돌아갑니다.)</i>"
+            f"⚠️ <b>[ 경고: {ticker} 리버스 및 가상장부 강제 초기화 ]</b>\n\n"
+            f"정말로 {ticker}의 리버스 모드를 종료하고 <b>가상장부(Escrow) 격리금액을 0원으로 완전 소각</b>하시겠습니까?\n"
+            "<i>(충분한 시드가 추가되었거나 로직 꼬임 시에만 권장하며, 해제 시 다음부터 일반 모드로 돌아갑니다.)</i>"
         )
         keyboard = [
-            [InlineKeyboardButton("✅ 네, 강제 해제합니다", callback_data=f"RESET:CONFIRM:{ticker}")],
+            [InlineKeyboardButton("✅ 네, 모두 초기화합니다", callback_data=f"RESET:CONFIRM:{ticker}")],
             [InlineKeyboardButton("❌ 아니오, 유지합니다", callback_data="RESET:MENU")]
         ]
         return msg, InlineKeyboardMarkup(keyboard)
 
-    def get_version_message(self, history_data):
-        msg = "🛠️ <b>[ 버전 및 업데이트 내역 ]</b>\n\n"
+    def get_version_message(self, history_data, page_index=None):
+        groups = {}
         for h in history_data:
+            ver_str = h if isinstance(h, str) else h.get('version', '')
+            major_ver = ver_str.split('.')[0] if '.' in ver_str else ver_str.split(' ')[0]
+            if major_ver not in groups:
+                groups[major_ver] = []
+            groups[major_ver].append(h)
+            
+        major_versions = list(groups.keys())
+        major_versions.reverse() 
+
+        if not major_versions:
+            return "📭 기록된 버전 히스토리가 없습니다.", None
+
+        if page_index is None:
+            current_major = major_versions[0]
+            items = groups.get(current_major, [])
+            title = f"🛠️ <b>[ 최신 버전({current_major}) 업데이트 내역 ]</b>\n\n"
+        else:
+            page_index = max(0, min(page_index, len(major_versions) - 1))
+            current_major = major_versions[page_index]
+            items = groups.get(current_major, [])
+            title = f"📚 <b>[ 과거 버전({current_major}) 명예의 전당 ]</b>\n\n"
+
+        msg = title
+        for h in items:
             if isinstance(h, str):
                 parts = h.split(' ', 2)
                 if len(parts) >= 3:
@@ -77,7 +104,28 @@ class TelegramView:
                     msg += f"📌 {h}\n\n"
             elif isinstance(h, dict): 
                 msg += f"📌 <b>{h.get('version', '')}</b> ({h.get('date', '')})\n▫️ {h.get('summary', '')}\n\n"
-        return msg.strip()
+        
+        msg = msg.strip()
+        keyboard = []
+        
+        if page_index is None:
+            if len(major_versions) > 1:
+                keyboard.append([InlineKeyboardButton(f"📜 과거 버전 명예의 전당 보기 ({major_versions[1]})", callback_data="VERSION:PAGE:1")])
+        else:
+            nav_row = []
+            if page_index < len(major_versions) - 1:
+                prev_major = major_versions[page_index + 1]
+                nav_row.append(InlineKeyboardButton(f"◀️ 이전 ({prev_major})", callback_data=f"VERSION:PAGE:{page_index + 1}"))
+            if page_index > 0:
+                next_major = major_versions[page_index - 1]
+                nav_row.append(InlineKeyboardButton(f"다음 ({next_major}) ▶️", callback_data=f"VERSION:PAGE:{page_index - 1}"))
+            
+            if nav_row:
+                keyboard.append(nav_row)
+            
+            keyboard.append([InlineKeyboardButton("⬆️ 접기 (최신 버전만 보기)", callback_data="VERSION:LATEST")])
+            
+        return msg, InlineKeyboardMarkup(keyboard)
 
     def create_sync_report(self, status_text, dst_text, cash, rp_amount, ticker_data, is_trade_active):
         total_locked = sum(t_info.get('escrow', 0.0) for t_info in ticker_data)
@@ -101,11 +149,26 @@ class TelegramView:
         for t_info in ticker_data:
             t = t_info['ticker']
             v_mode = t_info['version']
-            v_mode_display = "무매4" if v_mode == "V14" else "무매3"
+            
+            if t_info['t_val'] > (t_info['split'] * 1.1):
+                body_msg += f"⚠️ <b>[🚨 시스템 긴급 경고: 비정상 T값 폭주 감지!]</b>\n"
+                body_msg += f"🔎 현재 T값(<b>{t_info['t_val']:.4f}T</b>)이 설정된 분할수(<b>{int(t_info['split'])}분할</b>) 초과했습니다!\n"
+                body_msg += f"💡 <b>원인 역산 추정:</b> 수동 매수로 수량이 급증했거나, '/seed' 시드머니 설정이 대폭 축소되었습니다.\n"
+                body_msg += f"🛡️ <b>가동 조치:</b> 마이너스 호가 차단용 절대 하한선($0.01) 방어막 가동 중!\n\n"
+
+            if v_mode == "V17":
+                v_mode_display = "V17 시크릿"
+                main_icon = "🦇"
+            elif v_mode == "V14":
+                v_mode_display = "무매4"
+                main_icon = "💎"
+            else:
+                v_mode_display = "무매3"
+                main_icon = "💎"
+                
             is_rev = t_info.get('is_reverse', False)
             proc_status = t_info['plan'].get('process_status', '')
             
-            # 🔥 [V16.7 엠뷸런스 UI] 긴급 수혈 시 시각적 알림 추가 (방금 누락되었던 부분 복구!)
             if proc_status == "🩸리버스(긴급수혈)":
                 body_msg += f"⚠️ <b>[🚨 비상 상황: {t} 긴급 수혈 중]</b>\n"
                 body_msg += f"❗ <i>에스크로 금고가 바닥나 강제 매도를 통해 현금을 생성합니다.</i>\n\n"
@@ -113,10 +176,12 @@ class TelegramView:
             if is_rev:
                 bdg_txt = f"리버스 잔금쿼터 ${t_info['one_portion']:,.0f}"
                 icon = "🩸" if proc_status == "🩸리버스(긴급수혈)" else "🔄"
-                body_msg += f"{icon} <b>[{t}] {v_mode_display} 리버스 ({t_info['t_val']}T / {int(t_info['split'])}분)</b>\n"
+                body_msg += f"{icon} <b>[{t}] {v_mode_display} 리버스</b>\n"
+                body_msg += f"📈 진행: <b>{t_info['t_val']:.4f}T / {int(t_info['split'])}분할</b>\n"
             else:
-                bdg_txt = f"오늘 예산 ${t_info['one_portion']:,.0f}" if v_mode == "V14" else f"1회 ${t_info['one_portion']:,.0f}"
-                body_msg += f"💎 <b>[{t}] ({v_mode_display} / {t_info['t_val']}T / {int(t_info['split'])}분할)</b>\n"
+                bdg_txt = f"오늘 예산 ${t_info['one_portion']:,.0f}" if v_mode in ["V14", "V17"] else f"1회 ${t_info['one_portion']:,.0f}"
+                body_msg += f"{main_icon} <b>[{t}] {v_mode_display}</b>\n"
+                body_msg += f"📈 진행: <b>{t_info['t_val']:.4f}T / {int(t_info['split'])}분할</b>\n"
             
             body_msg += f"💵 총 시드: ${t_info['seed']:,.0f} ({bdg_txt})\n"
             
@@ -126,17 +191,29 @@ class TelegramView:
             elif is_rev and proc_status == "🩸리버스(긴급수혈)":
                 body_msg += f"🔐 <b>내 금고 보호액: $0.00 (Empty 🚨)</b>\n"
                 
-            body_msg += f"💰 현재 ${t_info['curr']:,.2f} / 평단 ${t_info['avg']:,.2f} <b>({t_info['qty']}주)</b>\n"
+            body_msg += f"💰 현재 ${t_info['curr']:,.2f} / 평단 ${t_info['avg']:,.2f} ({t_info['qty']}주)\n"
             
             sign = "+" if t_info['profit_amt'] >= 0 else "-"
             icon = "🔺" if t_info['profit_amt'] >= 0 else "🔻"
-            body_msg += f"{icon} <b>수익: {sign}{abs(t_info['profit_pct']):.2f}% ({sign}${abs(t_info['profit_amt']):,.2f})</b>\n"
+            body_msg += f"{icon} 수익: {sign}{abs(t_info['profit_pct']):.2f}% ({sign}${abs(t_info['profit_amt']):,.2f})\n"
             
             if is_rev:
-                body_msg += f"⚙️ 🌟 <b>5일선 별지점</b>: ${t_info['star_price']:.2f}\n"
+                body_msg += f"⚙️ 🌟 5일선 별지점: ${t_info['star_price']:.2f}\n"
             else:
                 body_msg += f"⚙️ 🎯 {t_info['target']}% | ⭐ {t_info['star_pct']}% | 🏎️가속 {t_info['turbo_txt']}\n"
             
+            hybrid_target = t_info.get('hybrid_target', 0.0)
+            sniper_pct = t_info.get('sniper_trigger', 9.0) 
+            trigger_reason = t_info.get('trigger_reason', '')
+            
+            if v_mode == "V17":
+                if trigger_reason.startswith("🛑"):
+                    body_msg += f"📉 <b>{trigger_reason}</b>\n"
+                elif hybrid_target > 0:
+                    body_msg += f"📉 <b>스나이퍼({trigger_reason}): ${hybrid_target:.2f} 이하 대기</b>\n"
+                else:
+                    body_msg += f"📉 <b>스나이퍼: 장전 대기 중</b>\n"
+
             body_msg += f"📋 <b>[주문 계획 - {proc_status}]</b>\n"
             
             if t_info['plan']['orders']:
@@ -145,8 +222,19 @@ class TelegramView:
 
                 for o in n_orders:
                     ico = "🔴" if o['side'] == 'BUY' else "🔵"
-                    if "수혈" in o['desc']: ico = "🩸"
-                    body_msg += f" {ico} {o['desc']}: <b>${o['price']} x {o['qty']}주</b> {'' if o['type']=='LIMIT' else f'({o['type']})'}\n"
+                    desc = o['desc']
+                    
+                    if "수혈" in desc: 
+                        ico = "🩸"
+                        desc = desc.replace("🩸", "")
+                    elif "시크릿" in desc: 
+                        ico = "🦇"
+                        desc = desc.replace("🦇", "")
+                        
+                    type_str = "" if o['type'] == 'LIMIT' else f"({o['type']})"
+                    type_disp = f" {type_str}" if type_str else ""
+                    
+                    body_msg += f" {ico} {desc}: <b>${o['price']} x {o['qty']}주</b>{type_disp}\n"
 
                 if jup_orders:
                     prices = sorted([o['price'] for o in jup_orders], reverse=True)
@@ -157,6 +245,11 @@ class TelegramView:
                     else: keyboard.append([InlineKeyboardButton(f"🚀 {t} 주문 실행", callback_data=f"EXEC:{t}")])
             else:
                 body_msg += f" 💤 주문 없음 (관망/예산소진)\n"
+            
+            if v_mode != "V17" and hybrid_target > 0 and not trigger_reason.startswith("🛑"):
+                body_msg += f"\n🎯 <b>스나이퍼 방어선(-{sniper_pct:.2f}%): ${hybrid_target:.2f}</b>\n"
+                body_msg += f"(💡 참고용으로 한투 사용자는 매수감시 모드에서 스나이퍼를 작동하실 수 있습니다.)\n"
+
             body_msg += "\n"
 
         final_msg = header_msg + body_msg
@@ -265,7 +358,8 @@ class TelegramView:
         
         draw.text((W/2, H - 40), f"Graduation Date: {end_date}", font=f_b, fill="#636366", anchor="mm")
         
-        fname = f"data/profit_{ticker}_{end_date}.png"
+        # 🔥 V20.10 졸업 이미지 무한 덮어쓰기 로직 적용 완료
+        fname = f"data/profit_{ticker}.png"
         img.save(fname)
         return fname
 
@@ -276,3 +370,4 @@ class TelegramView:
             [InlineKeyboardButton("💎 SOXL + TQQQ 통합", callback_data="TICKER:ALL")]
         ]
         return f"🔄 <b>[ 운용 종목 선택 ]</b>\n현재: <b>{', '.join(current_tickers)}</b>", InlineKeyboardMarkup(keyboard)
+
