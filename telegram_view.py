@@ -152,7 +152,7 @@ class TelegramView:
             
             if t_info['t_val'] > (t_info['split'] * 1.1):
                 body_msg += f"⚠️ <b>[🚨 시스템 긴급 경고: 비정상 T값 폭주 감지!]</b>\n"
-                body_msg += f"🔎 현재 T값(<b>{t_info['t_val']:.4f}T</b>)이 설정된 분할수(<b>{int(t_info['split'])}분할</b>)를 초과했습니다!\n"
+                body_msg += f"🔎 현재 T값(<b>{t_info['t_val']:.4f}T</b>)이 설정된 분할수(<b>{int(t_info['split'])}분할</b>) 초과했습니다!\n"
                 body_msg += f"💡 <b>원인 역산 추정:</b> 수동 매수로 수량이 급증했거나, '/seed' 시드머니 설정이 대폭 축소되었습니다.\n"
                 body_msg += f"🛡️ <b>가동 조치:</b> 마이너스 호가 차단용 절대 하한선($0.01) 방어막 가동 중!\n\n"
 
@@ -173,7 +173,6 @@ class TelegramView:
                 body_msg += f"⚠️ <b>[🚨 비상 상황: {t} 긴급 수혈 중]</b>\n"
                 body_msg += f"❗ <i>에스크로 금고가 바닥나 강제 매도를 통해 현금을 생성합니다.</i>\n\n"
             
-            # 🔥 V20.10 뷰어 업데이트: 모바일 가독성을 위해 제목을 완벽한 2줄 포맷으로 변경
             if is_rev:
                 bdg_txt = f"리버스 잔금쿼터 ${t_info['one_portion']:,.0f}"
                 icon = "🩸" if proc_status == "🩸리버스(긴급수혈)" else "🔄"
@@ -359,7 +358,8 @@ class TelegramView:
         
         draw.text((W/2, H - 40), f"Graduation Date: {end_date}", font=f_b, fill="#636366", anchor="mm")
         
-        fname = f"data/profit_{ticker}_{end_date}.png"
+        # 🔥 V20.10 졸업 이미지 무한 덮어쓰기 로직 적용 완료
+        fname = f"data/profit_{ticker}.png"
         img.save(fname)
         return fname
 
@@ -370,3 +370,4 @@ class TelegramView:
             [InlineKeyboardButton("💎 SOXL + TQQQ 통합", callback_data="TICKER:ALL")]
         ]
         return f"🔄 <b>[ 운용 종목 선택 ]</b>\n현재: <b>{', '.join(current_tickers)}</b>", InlineKeyboardMarkup(keyboard)
+

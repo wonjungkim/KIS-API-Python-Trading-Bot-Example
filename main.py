@@ -9,6 +9,7 @@ import pytz
 import time
 import math
 import asyncio
+import glob
 import pandas_market_calendars as mcal
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from dotenv import load_dotenv
@@ -114,6 +115,35 @@ def get_actual_execution_price(execs, target_qty, side_cd):
         return math.floor((total_amt / matched_qty) * 100) / 100.0
     return 0.0
 
+# 🔥 V20.10 방치형 봇 자정(Self-Cleaning) 로직
+def perform_self_cleaning():
+    try:
+        now = time.time()
+        seven_days = 7 * 24 * 3600
+        one_day = 24 * 3600
+        
+        for f in glob.glob("logs/*.log"):
+            if os.path.isfile(f) and os.stat(f).st_mtime < now - seven_days:
+                try: os.remove(f)
+                except: pass
+                
+        for f in glob.glob("data/*.bak_*"):
+            if os.path.isfile(f) and os.stat(f).st_mtime < now - seven_days:
+                try: os.remove(f)
+                except: pass
+                
+        for directory in ["data", "logs"]:
+            for f in glob.glob(f"{directory}/tmp*"):
+                if os.path.isfile(f) and os.stat(f).st_mtime < now - one_day:
+                    try: os.remove(f)
+                    except: pass
+    except Exception as e:
+        logging.error(f"🧹 자정(Self-Cleaning) 작업 중 오류 발생: {e}")
+
+async def scheduled_self_cleaning(context):
+    await asyncio.to_thread(perform_self_cleaning)
+    logging.info("🧹 [시스템 자정 작업 완료] 7일 초과 로그/백업 및 24시간 초과 임시 파일 소각 완료")
+
 async def scheduled_token_check(context):
     context.job.data['broker']._get_access_token(force=True)
 
@@ -193,7 +223,6 @@ async def scheduled_sniper_monitor(context):
     cfg, broker, strategy, tx_lock = app_data['cfg'], app_data['broker'], app_data['strategy'], app_data['tx_lock']
     chat_id = context.job.chat_id
     
-    # 🔥 V20 추가: 트래픽 밴 방지용 일일 타점 캐싱
     target_cache = app_data.setdefault('dynamic_targets', {})
     today_est_str = now_est.strftime('%Y%m%d')
     if target_cache.get('date') != today_est_str:
@@ -219,12 +248,11 @@ async def scheduled_sniper_monitor(context):
             prev_c = await asyncio.to_thread(broker.get_previous_close, t)
             if curr_p <= 0: continue
             
-            # 🔥 V20 추가: 동적 하이브리드 타점 캐싱 및 연산
             idx_ticker = "SOXX" if t == "SOXL" else "QQQ"
             if t not in target_cache:
                 weight = cfg.get_sniper_multiplier(t)
                 tgt = await asyncio.to_thread(broker.get_dynamic_sniper_target, idx_ticker, weight)
-                target_cache[t] = tgt if tgt is not None else (9.0 if t=="SOXL" else 5.0) # 계산 실패 시 안전장치
+                target_cache[t] = tgt if tgt is not None else (9.0 if t=="SOXL" else 5.0) 
 
             sniper_pct = target_cache[t]
             raw_target_price = prev_c * (1 - (sniper_pct / 100.0))
@@ -233,9 +261,6 @@ async def scheduled_sniper_monitor(context):
             is_sniper_armed = target_buy_price < avg_price
             trigger_reason = f"-{sniper_pct}% 동적 방어선"
             
-            # ==========================================================
-            # 🔥 V20 핵심: 가로채기(Intercept) 매수 로직 (시크릿 모드 ON 한정)
-            # ==========================================================
             if is_sniper_armed and target_buy_price > 0 and curr_p <= target_buy_price:
                 if cfg.get_secret_mode():
                     is_rev = cfg.get_reverse_state(t).get("is_active", False)
@@ -248,7 +273,6 @@ async def scheduled_sniper_monitor(context):
                     if sniper_budget < curr_p:
                         continue 
 
-                    # 1. 기존 LOC 주문 낚아채기 (취소)
                     await asyncio.to_thread(broker.cancel_all_orders_safe, t, side="BUY")
                     await asyncio.sleep(1.0)
                     
@@ -256,13 +280,11 @@ async def scheduled_sniper_monitor(context):
                     
                     for attempt in range(3):
                         if target_buy_price > 0:
-                            # 2. 매도 1호가 당겨오기 (빠른 체결 목적)
                             ask_price = await asyncio.to_thread(broker.get_ask_price, t)
                             exec_price = ask_price if ask_price > 0 else curr_p
                             
                             buy_qty = math.floor(sniper_budget / exec_price)
                             if buy_qty > 0:
-                                # 3. 지정가 매수 격발
                                 res = broker.send_order(t, "BUY", buy_qty, exec_price, "LIMIT")
                                 if res.get('rt_cd') == '0':
                                     await asyncio.sleep(2.0)
@@ -315,9 +337,6 @@ async def scheduled_sniper_monitor(context):
                             
                     continue
 
-            # ==========================================================
-            # 아래는 기존 V17 익절 로직 (잭팟 및 쿼터 익절) - 정상 유지
-            # ==========================================================
             target_pct_val = cfg.get_target_profit(t)
             target_price = math.ceil(avg_price * (1 + target_pct_val / 100.0) * 100) / 100.0
             
@@ -601,6 +620,9 @@ def main():
     print(f"⏰ 자동 동기화: 08:30(여름) / 09:30(겨울) 자동 변경")
     print("=" * 50)
     
+    # 🔥 봇 구동 시 자정 작업(찌꺼기 소각) 1회 즉시 실행
+    perform_self_cleaning()
+    
     if ADMIN_CHAT_ID: cfg.set_chat_id(ADMIN_CHAT_ID)
     broker = KoreaInvestmentBroker(APP_KEY, APP_SECRET, CANO, ACNT_PRDT_CD)
     strategy = InfiniteStrategy(cfg)
@@ -644,6 +666,9 @@ def main():
 
         jq.run_repeating(scheduled_premarket_monitor, interval=60, chat_id=cfg.get_chat_id(), data=app_data)
         jq.run_repeating(scheduled_sniper_monitor, interval=60, chat_id=cfg.get_chat_id(), data=app_data)
+        
+        # 🔥 매일 오전 06:00 KST에 자정(Self-Cleaning) 스케줄러 실행
+        jq.run_daily(scheduled_self_cleaning, time=datetime.time(6, 0, tzinfo=kst), days=tuple(range(7)), chat_id=cfg.get_chat_id(), data=app_data)
         
     app.run_polling()
 

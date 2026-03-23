@@ -5,6 +5,7 @@
 import logging
 import datetime
 import pytz
+import time
 import os
 import math 
 import asyncio
@@ -311,6 +312,24 @@ class TelegramController:
                         msg = f"🎉 <b>[{ticker} 졸업 확인!]</b>\n장부를 명예의 전당에 저장하고 새 사이클을 준비합니다."
                         if added_seed > 0: msg += f"\n💸 <b>자동 복리 +${added_seed:,.0f}</b> 이 다음 운용 시드에 완벽하게 추가되었습니다!"
                         await context.bot.send_message(chat_id, msg, parse_mode='HTML')
+
+                        # 🔥 V20.10: 졸업 인증 이미지 생성 및 텔레그램 즉시 발송 로직 추가
+                        if new_hist:
+                            try:
+                                img_path = self.view.create_profit_image(
+                                    ticker=ticker,
+                                    profit=new_hist['profit'],
+                                    yield_pct=new_hist['yield'],
+                                    invested=new_hist['invested'],
+                                    revenue=new_hist['revenue'],
+                                    end_date=new_hist['end_date']
+                                )
+                                if os.path.exists(img_path):
+                                    with open(img_path, 'rb') as photo:
+                                        await context.bot.send_photo(chat_id=chat_id, photo=photo)
+                            except Exception as e:
+                                logging.error(f"📸 졸업 이미지 생성/발송 실패: {e}")
+
                     self._sync_escrow_cash(ticker) 
                     return "SUCCESS"
 
@@ -513,7 +532,6 @@ class TelegramController:
                 
             msg += f"{icon} <b>{t} ({ver_display} 모드)</b>\n▫️ 분할: <b>{int(self.cfg.get_split_count(t))}회</b>\n▫️ 목표: <b>{self.cfg.get_target_profit(t)}%</b>\n▫️ 자동복리: <b>{self.cfg.get_compound_rate(t)}%</b>\n"
             
-            # 🔥 V20 버그 수정: V17 모드일 때 '가중치(Multiplier)' 정보를 출력하도록 변경
             if ver == "V17":
                 sniper_multiplier = self.cfg.get_sniper_multiplier(t)
                 msg += f"▫️ 스나이퍼 타점 가중치: <b>x {sniper_multiplier}</b>\n\n"
@@ -531,7 +549,6 @@ class TelegramController:
                 InlineKeyboardButton(f"🔄 {t} 무매3/무매4 전환", callback_data=f"TOGGLE:VERSION:{t}"),
                 InlineKeyboardButton(f"✂️ {t} 액면보정", callback_data=f"INPUT:STOCK_SPLIT:{t}")
             ]
-            # 🔥 V20 버그 수정: 스나이퍼 입력 버튼 유지
             if ver == "V17":
                 row2.append(InlineKeyboardButton(f"📉 {t} 타점가중치", callback_data=f"INPUT:SNIPER:{t}"))
             keyboard.append(row2)
@@ -700,7 +717,6 @@ class TelegramController:
             elif sub == "TARGET": ko_name = "목표 수익률(%)"
             elif sub == "COMPOUND": ko_name = "자동 복리율(%)"
             elif sub == "STOCK_SPLIT": ko_name = "액면 분할/병합 비율 (예: 10분할은 10, 10병합은 0.1)"
-            # 🔥 V20 버그 수정: 입력 안내 멘트 변경
             elif sub == "SNIPER": ko_name = "스나이퍼 타점 가중치 (예: SOXL 기본 1.0, TQQQ 기본 0.9)"
             else: ko_name = "값"
             
@@ -754,7 +770,6 @@ class TelegramController:
                 await update.message.reply_text(f"✅ [{ticker}] 수동 액면 보정 완료\n▫️ 모든 장부 기록이 {val}배 비율로 정밀하게 소급 조정되었습니다.")
                 
             elif state.startswith("CONF_SNIPER"):
-                # 🔥 V20 버그 수정: 입력값을 가중치(Multiplier)로 저장
                 if val <= 0: return await update.message.reply_text("❌ 오류: 가중치는 0보다 커야 합니다.")
                 ticker = parts[2]
                 self.cfg.set_sniper_multiplier(ticker, val)

@@ -444,9 +444,10 @@ class ConfigManager:
         history = self.get_version_history()
         if history and len(history) > 0:
             latest_entry = history[-1]
-            if isinstance(latest_entry, str):
+            if isinstance(latest_entry, dict):
+                return latest_entry.get("version", "V14.x")
+            elif isinstance(latest_entry, str):
                 return latest_entry.split(' ')[0] 
-            return latest_entry.get("version", "V14.x")
         return "V14.x"
 
     def get_history(self):
