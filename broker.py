@@ -161,12 +161,14 @@ class KoreaInvestmentBroker:
 
     def get_account_balance(self):
         cash = 0.0
-        holdings = None 
+        holdings = {}
+        api_success = False # 💡 [V21.16 패치] API 통신 성공 여부 플래그
         
         params = {"CANO": self.cano, "ACNT_PRDT_CD": self.acnt_prdt_cd, "WCRC_FRCR_DVSN_CD": "02", "NATN_CD": "840", "TR_MKET_CD": "00", "INQR_DVSN_CD": "00"}
         res = self._call_api("CTRP6504R", "/uapi/overseas-stock/v1/trading/inquire-present-balance", "GET", params=params)
         
         if res.get('rt_cd') == '0':
+            api_success = True
             o2 = res.get('output2', {})
             if isinstance(o2, list) and len(o2) > 0: o2 = o2[0]
             
@@ -177,7 +179,6 @@ class KoreaInvestmentBroker:
             raw_bp = dncl_amt + sll_amt - buy_amt
             cash = math.floor((raw_bp * 0.9945) * 100) / 100.0              
 
-        holdings = {}
         target_excgs = ["NASD", "AMEX", "NYSE"] 
         
         for excg in target_excgs:
@@ -185,6 +186,7 @@ class KoreaInvestmentBroker:
             res_hold = self._call_api("TTTS3012R", "/uapi/overseas-stock/v1/trading/inquire-balance", "GET", params_hold)
             
             if res_hold.get('rt_cd') == '0':
+                api_success = True
                 if cash <= 0:
                     o2 = res_hold.get('output2', {})
                     if isinstance(o2, list) and len(o2) > 0: o2 = o2[0]
@@ -198,7 +200,12 @@ class KoreaInvestmentBroker:
                     if qty > 0 and ticker not in holdings: 
                         holdings[ticker] = {'qty': qty, 'avg': avg}
         
-        return cash, holdings if holdings else None
+        # 💡 [V21.16 패치] 0주 보유 시 None 반환 버그 해결
+        # API 통신이 한 번이라도 성공했다면 빈 딕셔너리({})를 그대로 반환하여 0주 보유 상태(✨새출발)를 정상 보고합니다.
+        if api_success:
+            return cash, holdings
+        else:
+            return cash, None
 
     def get_current_price(self, ticker, is_market_closed=False):
         try:
