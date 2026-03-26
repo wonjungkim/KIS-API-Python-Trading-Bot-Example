@@ -450,7 +450,8 @@ async def scheduled_sniper_monitor(context):
                             fail_history[t] = now_ts
                         
                         ma_5day = await asyncio.to_thread(broker.get_5day_ma, t)
-                        plan = strategy.get_plan(t, curr_p, avg_price, qty, prev_c, ma_5day=ma_5day, market_type="REG", available_cash=allocated_cash[t], force_turbo_off=force_turbo_off)
+                        # 💡 [핵심 수술 부위 1] is_simulation=True를 투여하여 가용예산=0 버그로 인한 가짜 리버스 진입 완벽 차단!
+                        plan = strategy.get_plan(t, curr_p, avg_price, qty, prev_c, ma_5day=ma_5day, market_type="REG", available_cash=allocated_cash[t], force_turbo_off=force_turbo_off, is_simulation=True)
                         
                         for o in plan.get('core_orders', []) + plan.get('bonus_orders', []):
                             if o['side'] == 'BUY':
@@ -530,7 +531,8 @@ async def scheduled_sniper_monitor(context):
                         fail_history_j[t] = now_ts
                     
                     ma_5day = await asyncio.to_thread(broker.get_5day_ma, t)
-                    plan = strategy.get_plan(t, curr_p, avg_price, qty, prev_c, ma_5day=ma_5day, market_type="REG", available_cash=allocated_cash[t], force_turbo_off=force_turbo_off)
+                    # 💡 [핵심 수술 부위 2] is_simulation=True를 투여하여 가용예산=0 버그 방어!
+                    plan = strategy.get_plan(t, curr_p, avg_price, qty, prev_c, ma_5day=ma_5day, market_type="REG", available_cash=allocated_cash[t], force_turbo_off=force_turbo_off, is_simulation=True)
                     
                     for o in plan.get('core_orders', []) + plan.get('bonus_orders', []):
                         if o['side'] == 'SELL':
@@ -641,7 +643,6 @@ async def scheduled_sniper_monitor(context):
                         
                     now_ts = time.time()
                     fail_history_q = app_data.setdefault('sniper_q_fail_ts', {})
-                    # 💡 [패치] 스나이퍼 매도(쿼터) 실패 시 쿨타임 3600초 -> 600초(10분)로 대폭 축소
                     if now_ts - fail_history_q.get(t, 0) > 600:
                         msg = f"🛡️ <b>[{t}] 스나이퍼 쿼터 기습 실패 (방어선 복구)</b>\n"
                         msg += f"🎯 3회에 걸쳐 쿼터 익절을 시도했으나 체결되지 않았습니다.\n"
@@ -650,7 +651,8 @@ async def scheduled_sniper_monitor(context):
                         fail_history_q[t] = now_ts
                     
                     ma_5day = await asyncio.to_thread(broker.get_5day_ma, t)
-                    plan = strategy.get_plan(t, curr_p, avg_price, qty, prev_c, ma_5day=ma_5day, market_type="REG", available_cash=allocated_cash[t], force_turbo_off=force_turbo_off)
+                    # 💡 [핵심 수술 부위 3] is_simulation=True를 투여하여 가용예산=0 버그 방어!
+                    plan = strategy.get_plan(t, curr_p, avg_price, qty, prev_c, ma_5day=ma_5day, market_type="REG", available_cash=allocated_cash[t], force_turbo_off=force_turbo_off, is_simulation=True)
                     
                     for o in plan.get('core_orders', []):
                         if o['side'] == 'SELL' and o['type'] == 'LOC':
@@ -692,8 +694,7 @@ async def scheduled_regular_trade(context):
     
     latest_version = cfg.get_latest_version()
 
-    # 💡 [핵심 패치] 천둥소리를 내는 소떼(Thundering Herd) 현상 방지를 위한 무작위 지터(Jitter) 생성
-    jitter_seconds = random.randint(0, 180) # 0초 ~ 180초(3분) 무작위 대기
+    jitter_seconds = random.randint(0, 180)
 
     await context.bot.send_message(
         chat_id=chat_id, 
@@ -702,7 +703,6 @@ async def scheduled_regular_trade(context):
         parse_mode='HTML'
     )
 
-    # 무작위 시간만큼 똑똑하게 대기
     await asyncio.sleep(jitter_seconds)
 
     MAX_RETRIES = 15
