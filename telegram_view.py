@@ -213,12 +213,19 @@ class TelegramView:
             sniper_pct = t_info.get('sniper_trigger', 9.0) 
             trigger_reason = t_info.get('trigger_reason', '')
             secret_quarter_target = t_info.get('secret_quarter_target', 0.0)
+            tracking_info = t_info.get('tracking_info', {}) # 💡 [수술 패치] 추적 상태 메모리 로드
             
             if v_mode == "V17":
                 if trigger_reason.startswith("🛑"):
                     body_msg += f"📉 <b>{trigger_reason}</b>\n"
                 elif hybrid_target > 0:
-                    body_msg += f"📉 <b>스나이퍼(-{sniper_pct:.2f}%): ${hybrid_target:.2f} 이하 대기</b>\n"
+                    # 💡 [수술 패치] 능동형 추적 모드일 경우 UI 동기화
+                    if tracking_info.get('is_tracking', False):
+                        lowest = tracking_info.get('lowest_price', hybrid_target)
+                        trigger_val = 1.5 if t == "SOXL" else 1.0
+                        body_msg += f"🎯 <b>타점 이탈! 바닥 추적 중 (최저: ${lowest:.2f} / 목표: +{trigger_val}%)</b>\n"
+                    else:
+                        body_msg += f"📉 <b>스나이퍼 방어선(-{sniper_pct:.2f}%): ${hybrid_target:.2f} 이하 대기</b>\n"
                 else:
                     body_msg += f"📉 <b>스나이퍼: 장전 대기 중</b>\n"
                 
@@ -380,3 +387,4 @@ class TelegramView:
             [InlineKeyboardButton("💎 SOXL + TQQQ 통합", callback_data="TICKER:ALL")]
         ]
         return f"🔄 <b>[ 운용 종목 선택 ]</b>\n현재: <b>{', '.join(current_tickers)}</b>", InlineKeyboardMarkup(keyboard)
+

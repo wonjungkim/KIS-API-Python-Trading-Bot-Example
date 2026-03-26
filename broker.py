@@ -200,12 +200,48 @@ class KoreaInvestmentBroker:
                     if qty > 0 and ticker not in holdings: 
                         holdings[ticker] = {'qty': qty, 'avg': avg}
         
-        # 💡 [V21.16 패치] 0주 보유 시 None 반환 버그 해결
-        # API 통신이 한 번이라도 성공했다면 빈 딕셔너리({})를 그대로 반환하여 0주 보유 상태(✨새출발)를 정상 보고합니다.
         if api_success:
             return cash, holdings
         else:
             return cash, None
+
+    # 💡 [핵심 수술] 능동형 추적 스나이퍼를 위한 실시간 5분봉 추출 메서드
+    def get_current_5min_candle(self, ticker):
+        """
+        현재 시점 기준으로 진행 중인 가장 최근 5분 단위의 OHLC 캔들을 반환합니다.
+        (예: 현재가 10시 07분이라면 10시 05분 ~ 10시 09분에 해당하는 캔들 데이터)
+        """
+        try:
+            # yfinance를 통해 당일 1분봉 데이터를 가져옴
+            stock = yf.Ticker(ticker)
+            df = stock.history(period="1d", interval="1m", prepost=True)
+            
+            if df.empty:
+                return None
+                
+            # 시간 기반 그룹핑을 위해 인덱스를 5분 단위로 Resample
+            # 당일 데이터의 마지막 시간(현재시간) 기준으로 가장 최근의 5분 그룹을 가져옴
+            resampled = df.resample('5min', label='left', closed='left').agg({
+                'Open': 'first',
+                'High': 'max',
+                'Low': 'min',
+                'Close': 'last'
+            }).dropna()
+            
+            if resampled.empty:
+                return None
+                
+            last_candle = resampled.iloc[-1]
+            
+            return {
+                'open': float(last_candle['Open']),
+                'high': float(last_candle['High']),
+                'low': float(last_candle['Low']),
+                'close': float(last_candle['Close'])
+            }
+        except Exception as e:
+            print(f"⚠️ [Broker] 실시간 5분봉 캔들 조회 실패 ({ticker}): {e}")
+            return None
 
     def get_current_price(self, ticker, is_market_closed=False):
         try:

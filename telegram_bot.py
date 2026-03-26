@@ -142,6 +142,9 @@ class TelegramController:
             ticker_data_list = []
             total_buy_needed = 0.0
 
+            # 💡 [수술 패치] main.py의 스나이퍼 루프가 사용하는 전역 캐시(app_data)에 접근하여 추적 상태를 빼옵니다
+            tracking_cache = context.job_queue.jobs()[0].data.get('sniper_tracking', {}) if context.job_queue and context.job_queue.jobs() else {}
+
             for t in sorted_tickers:
                 h = holdings.get(t, {'qty':0, 'avg':0})
                 curr = await asyncio.to_thread(self.broker.get_current_price, t, is_market_closed=(status_code == "CLOSE"))
@@ -170,7 +173,6 @@ class TelegramController:
                     today_str = datetime.datetime.now(pytz.timezone('Asia/Seoul')).strftime('%Y-%m-%d')
                     alert_key = f"{t}_{today_str}"
                     if alert_key not in self.panic_alerts:
-                        # 💡 텍스트 교정 완료: 호들갑을 떨지 않고 듬직하게 팩트만 전달합니다!
                         alert_msg = f"🚨 <b>[긴급] {t} 패닉 갭 하락 감지! ({gap_pct}%)</b>\n폭락 방어막 가동! V17 스나이퍼가 정밀 가중치(10% Cap)를 적용하여 <b>-{dynamic_pct}%</b> 타점으로 자동 투입되었습니다!"
                         await update.message.reply_text(alert_msg, parse_mode='HTML')
                         self.panic_alerts[alert_key] = True
@@ -213,6 +215,9 @@ class TelegramController:
                         is_first_half = t_val < (split / 2)
                         secret_quarter_target = plan.get('star_price', 0.0) if is_first_half else math.ceil(actual_avg * 1.0025 * 100) / 100.0
 
+                # 💡 [수술 패치] ticker_data_list에 실시간 추적 상태(tracking_info) 추가
+                tracking_status = tracking_cache.get(t, {})
+
                 ticker_data_list.append({
                     'ticker': t, 'version': ver, 't_val': t_val, 'split': split, 'curr': curr, 'avg': actual_avg, 'qty': actual_qty,
                     'profit_amt': (curr - actual_avg) * actual_qty if actual_qty > 0 else 0, 
@@ -231,7 +236,8 @@ class TelegramController:
                     'secret_quarter_target': secret_quarter_target,
                     'day_high': day_high,
                     'day_low': day_low,
-                    'prev_close': safe_prev_close
+                    'prev_close': safe_prev_close,
+                    'tracking_info': tracking_status # 💡 추적 정보 탑재
                 })
                 total_buy_needed += sum(o['price']*o['qty'] for o in plan['orders'] if o['side']=='BUY')
 
