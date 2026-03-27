@@ -17,10 +17,10 @@ class TelegramView:
         season_short = "🌞서머타임 ON" if "Summer" in season_icon else "❄️서머타임 OFF"
         sync_time = "08:30" if target_hour == 17 else "09:30"
 
-        # 💡 [승승장군 핵심 수술] 옵션 C: 절대 방어형 타이틀 적용 (모바일 1줄 최적화)
+        # 💡 [승승장군 핵심 수술] 모바일 1줄 최적화 및 동적 버전 연동 완료
         return (
-            f"🌌 <b>[ 인피니트 스노우볼 V22 : 앱솔루트 엔진 ]</b>\n" 
-            f"⚡ <b>다이내믹 추적 스나이퍼 & API 무결성 방어막</b> \n\n"
+            f"🌌 <b>[ 인피니트 스노우볼 {latest_version} ]</b>\n" 
+            f"⚡ <b>다이내믹 추적 스나이퍼 & API 무결성</b> \n\n"
             f"🕒 <b>[ 운영 스케줄 ({season_short}) ]</b>\n"
             f"🔹 6시간 간격 : 🔑 API 토큰 자동 갱신\n"
             f"🔹 {sync_time} : 📝 잔고 동기화 & 자동 복리\n"
