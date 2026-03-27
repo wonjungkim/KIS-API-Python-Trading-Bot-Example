@@ -120,6 +120,7 @@ class TelegramController:
 
         for t in self.cfg.get_active_tickers():
             self.cfg.set_version(t, "V14")
+            
         await update.message.reply_text("✅ <b>모든 종목이 오리지널 V4(무매4) 모드로 복귀했습니다.</b>", parse_mode='HTML')
 
     async def cmd_sync(self, update, context):
@@ -173,7 +174,8 @@ class TelegramController:
                     today_str = datetime.datetime.now(pytz.timezone('Asia/Seoul')).strftime('%Y-%m-%d')
                     alert_key = f"{t}_{today_str}"
                     if alert_key not in self.panic_alerts:
-                        alert_msg = f"🚨 <b>[긴급] {t} 패닉 갭 하락 감지! ({gap_pct}%)</b>\n폭락 방어막 가동! V17 스나이퍼가 정밀 가중치(10% Cap)를 적용하여 <b>-{dynamic_pct}%</b> 타점으로 자동 투입되었습니다!"
+                        # 🚀 [문구 수술 완료] 10% Cap 문구를 능동형 15% 개방으로 수정
+                        alert_msg = f"🚨 <b>[긴급] {t} 패닉 갭 하락 감지! ({gap_pct}%)</b>\n폭락 방어막 가동! V17 능동형 스나이퍼가 심해 가중치(최대 15% 개방)를 적용하여 <b>-{dynamic_pct}%</b> 타점까지 닻을 내렸습니다!"
                         await update.message.reply_text(alert_msg, parse_mode='HTML')
                         self.panic_alerts[alert_key] = True
                 
@@ -194,10 +196,11 @@ class TelegramController:
                 
                 is_already_ordered = self.cfg.check_lock(t, "REG") or self.cfg.check_lock(t, "SNIPER")
                 
+                # 💡 [핵심 수술 완료] 타임 패러독스 방어 백신 투여! 단순 조회 시 무조건 is_simulation=True 강제 고정
                 plan = self.strategy.get_plan(
                     t, curr, actual_avg, actual_qty, safe_prev_close, ma_5day=ma_5day,
                     market_type="REG", available_cash=allocated_cash[t], force_turbo_off=force_turbo_off,
-                    is_simulation=is_already_ordered 
+                    is_simulation=True 
                 )
                 
                 split = self.cfg.get_split_count(t)
