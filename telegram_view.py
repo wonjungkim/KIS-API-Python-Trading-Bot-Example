@@ -234,18 +234,27 @@ class TelegramView:
                     else:
                         body_msg += f"💥 <b>스나이퍼: 명중 완료</b>\n"
                         
+                elif tracking_info.get('is_trailing', False):
+                    # 상방 트레일링 스나이퍼 락온 중 (시안 A)
+                    peak_price = tracking_info.get('peak_price', 0.0)
+                    trigger_price = tracking_info.get('trigger_price', 0.0)
+                    body_msg += f"🎯 <b>쿼터 추적(${trigger_price:.2f}) 중 (고가: ${peak_price:.2f})</b>\n"
+                    
                 elif tracking_info.get('is_tracking', False):
+                    # 하방 장중 바닥 추적 중 (기존 로직)
                     lowest = tracking_info.get('lowest_price', 0.0)
                     trigger_val = 1.5 if t == "SOXL" else 1.0
                     body_msg += f"🎯 <b>장전선 이탈! 장중 바닥 추적 중</b>\n  <b>(최저: ${lowest:.2f} / 목표반등: +{trigger_val}%)</b>\n"
+                    
                 elif hybrid_target > 0:
                     body_msg += f"📉 <b>스나이퍼: {sniper_pct:.2f}% 진폭(TR) 대기</b>\n"
+                    
                 else:
                     body_msg += f"📉 <b>스나이퍼: 장전 대기 중</b>\n"
                 
-                if secret_quarter_target > 0:
-                    sq_pct = ((secret_quarter_target - t_info['avg']) / t_info['avg'] * 100) if t_info['avg'] > 0 else 0.0
-                    body_msg += f"🦇 <b>쿼터 스나이퍼: +{sq_pct:.2f}% 이상 대기</b>\n"
+                if secret_quarter_target > 0 and not tracking_info.get('is_trailing', False):
+                    # 상방 트레일링 스나이퍼 락온 대기
+                    body_msg += f"🦇 <b>쿼터 스나이퍼: ${secret_quarter_target:.2f} 이상 대기</b>\n"
 
             body_msg += f"📋 <b>[주문 계획 - {proc_status}]</b>\n"
             

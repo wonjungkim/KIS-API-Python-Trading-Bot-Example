@@ -140,14 +140,14 @@ class InfiniteStrategy:
 
         base_price = current_price if current_price > 0 else prev_close
         if base_price <= 0: 
-            return {"orders": [], "core_orders": [], "bonus_orders": [], "smart_core_orders": [], "smart_bonus_orders": [], "t_val": t_val, "one_portion": one_portion_amt, "process_status": "⛔가격오류", "is_reverse": is_reverse, "star_price": star_price, "star_ratio": star_ratio, "real_cash_used": real_available_cash}
+            return {"orders": [], "core_orders": [], "bonus_orders": [], "smart_core_orders": [], "smart_bonus_orders": [], "t_val": t_val, "one_portion": one_portion_amt, "process_status": "⛔가격오류", "is_reverse": is_reverse, "star_price": star_price, "star_ratio": star_ratio, "real_cash_used": real_available_cash, "tracking_info": {}}
 
         if market_type == "PRE_CHECK":
             process_status = "🌅프리마켓"
             if qty > 0 and target_price > 0 and current_price >= target_price and not is_reverse:
                 core_orders.append({"side": "SELL", "price": current_price, "qty": qty, "type": "LIMIT", "desc": "🌅프리:목표돌파익절"})
             orders = core_orders + bonus_orders
-            return {"orders": orders, "core_orders": core_orders, "bonus_orders": bonus_orders, "smart_core_orders": [], "smart_bonus_orders": [], "t_val": t_val, "one_portion": one_portion_amt, "process_status": process_status, "is_reverse": is_reverse, "star_price": star_price, "star_ratio": star_ratio, "real_cash_used": real_available_cash}
+            return {"orders": orders, "core_orders": core_orders, "bonus_orders": bonus_orders, "smart_core_orders": [], "smart_bonus_orders": [], "t_val": t_val, "one_portion": one_portion_amt, "process_status": process_status, "is_reverse": is_reverse, "star_price": star_price, "star_ratio": star_ratio, "real_cash_used": real_available_cash, "tracking_info": {}}
 
         if market_type == "REG":
             if qty == 0:
@@ -157,7 +157,7 @@ class InfiniteStrategy:
                 if buy_qty > 0:
                     core_orders.append({"side": "BUY", "price": buy_price, "qty": buy_qty, "type": "LOC", "desc": "🆕새출발"})
                 orders = core_orders + bonus_orders
-                return {"orders": orders, "core_orders": core_orders, "bonus_orders": bonus_orders, "smart_core_orders": [], "smart_bonus_orders": [], "t_val": t_val, "one_portion": one_portion_amt, "process_status": process_status, "is_reverse": False, "star_price": star_price, "star_ratio": star_ratio, "real_cash_used": real_available_cash}
+                return {"orders": orders, "core_orders": core_orders, "bonus_orders": bonus_orders, "smart_core_orders": [], "smart_bonus_orders": [], "t_val": t_val, "one_portion": one_portion_amt, "process_status": process_status, "is_reverse": False, "star_price": star_price, "star_ratio": star_ratio, "real_cash_used": real_available_cash, "tracking_info": {}}
 
             if is_reverse:
                 sell_divisor = 10 if split <= 20 else 20
@@ -209,7 +209,7 @@ class InfiniteStrategy:
 
                 core_orders, bonus_orders, smart_core_orders, smart_bonus_orders = apply_wash_trade_shield(core_orders, bonus_orders, smart_core_orders, smart_bonus_orders)        
                 orders = core_orders + bonus_orders
-                return {"orders": orders, "core_orders": core_orders, "bonus_orders": bonus_orders, "smart_core_orders": [], "smart_bonus_orders": [], "t_val": t_val, "one_portion": one_portion_amt, "process_status": process_status, "is_reverse": is_reverse, "star_price": star_price, "star_ratio": star_ratio, "real_cash_used": real_available_cash}
+                return {"orders": orders, "core_orders": core_orders, "bonus_orders": bonus_orders, "smart_core_orders": [], "smart_bonus_orders": [], "t_val": t_val, "one_portion": one_portion_amt, "process_status": process_status, "is_reverse": is_reverse, "star_price": star_price, "star_ratio": star_ratio, "real_cash_used": real_available_cash, "tracking_info": {}}
 
             if is_jackpot_reached and (t_val > (split - 1) or is_money_short):
                 process_status = "🎉대박익절(리버스생략)"
@@ -311,5 +311,6 @@ class InfiniteStrategy:
                 "smart_core_orders": smart_core_orders, "smart_bonus_orders": smart_bonus_orders,
                 "t_val": t_val, "one_portion": one_portion_amt, "process_status": process_status,
                 "is_reverse": is_reverse, "star_price": star_price, "star_ratio": star_ratio,
-                "real_cash_used": real_available_cash
+                "real_cash_used": real_available_cash,
+                "tracking_info": {} # 상방 스나이퍼 상태 주입을 위한 빈 그릇 생성
             }
