@@ -33,7 +33,7 @@ class TelegramView:
             "▶️ <b>/settlement</b> : ⚙️ 분할/복리/액면 설정\n"
             "▶️ <b>/seed</b> : 💵 개별 시드머니 관리\n"
             "▶️ <b>/ticker</b> : 🔄 운용 종목 선택\n"
-            "▶️ <b>/mode</b> : 🏎️ 일반/가속 모드 변경\n"
+            "▶️ <b>/mode</b> : 🎯 상방 스나이퍼 ON/OFF\n"
             "▶️ <b>/version</b> : 🛠️ 버전 및 업데이트 내역\n\n" 
             "⚠️ <b>/reset</b> : 🔓 비상 해제 메뉴 (락/리버스)\n" 
             "<i>┗ 🚨 수동 닻 올리기: 예산 부족으로 리버스 진입 후 외화RP매도 등 예수금을 추가 입금하셨다면, 이 메뉴에서 반드시 '리버스 강제 해제'를 눌러 닻을 올려주세요!</i>"
@@ -161,6 +161,7 @@ class TelegramView:
                 
             is_rev = t_info.get('is_reverse', False)
             proc_status = t_info['plan'].get('process_status', '')
+            tracking_info = t_info.get('tracking_info', {})
             
             if proc_status == "🩸리버스(긴급수혈)":
                 body_msg += f"⚠️ <b>[🚨 비상 상황: {t} 긴급 수혈 중]</b>\n"
@@ -203,15 +204,39 @@ class TelegramView:
             icon = "🔺" if t_info['profit_amt'] >= 0 else "🔻"
             body_msg += f"{icon} 수익: {sign}{abs(t_info['profit_pct']):.2f}% ({sign}${abs(t_info['profit_amt']):,.2f})\n"
             
+            # 💡 [V22.10 패치] 1줄 압축 표출 완벽 복구 및 리버스 모드 스나이퍼 대기열 노출
+            sniper_status_txt = t_info.get('upward_sniper', 'OFF')
+            
             if is_rev:
-                body_msg += f"⚙️ 🌟 5일선 별지점: ${t_info['star_price']:.2f}\n"
+                if v_mode == "V17":
+                    body_msg += f"⚙️ 🌟 5일선 별지점: ${t_info['star_price']:.2f}\n"
+                else:
+                    body_msg += f"⚙️ 🌟 5일선 별지점: ${t_info['star_price']:.2f} | 🎯감시: {sniper_status_txt}\n"
             else:
-                body_msg += f"⚙️ 🎯 {t_info['target']}% | ⭐ {t_info['star_pct']}% | 🏎️가속 {t_info['turbo_txt']}\n"
+                if v_mode == "V17":
+                    body_msg += f"⚙️ 🎯 {t_info['target']}% | ⭐ {t_info['star_pct']}%\n"
+                else:
+                    body_msg += f"⚙️ 🎯 {t_info['target']}% | ⭐ {t_info['star_pct']}% | 🎯감시: {sniper_status_txt}\n"
+                
+            # 리버스 모드 포함하여 스나이퍼 대기선 표출 (V17 제외)
+            if sniper_status_txt == "ON" and v_mode != "V17":
+                if tracking_info.get('is_trailing', False):
+                    peak_price = tracking_info.get('peak_price', 0.0)
+                    trigger_price = tracking_info.get('trigger_price', 0.0)
+                    body_msg += f"🎯 상방 추적(${trigger_price:.2f}) 중 (고가: ${peak_price:.2f})\n"
+                else:
+                    safe_floor = math.ceil(t_info['avg'] * 1.005 * 100) / 100.0
+                    if is_rev:
+                        sn_target = safe_floor
+                    else:
+                        sn_target = max(t_info['star_price'], safe_floor)
+                        
+                    if sn_target > 0:
+                        body_msg += f"🎯 상방 스나이퍼: ${sn_target:.2f} 이상 대기\n"
             
             hybrid_target = t_info.get('hybrid_target', 0.0)
             sniper_pct = t_info.get('sniper_trigger', 0.0) 
             secret_quarter_target = t_info.get('secret_quarter_target', 0.0)
-            tracking_info = t_info.get('tracking_info', {}) 
             
             if v_mode == "V17":
                 if "가로채기" in proc_status:
