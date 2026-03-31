@@ -620,7 +620,7 @@ class KoreaInvestmentBroker:
                 ret.metric_val = hv_val
                 ret.weight = weight
                 ret.base_amp = base_amp
-                ret.metric_name = "SOXX 자체 HV"
+                ret.metric_name = "SOXX HV"
                 ret.metric_base = round(hv_val / weight, 2) if weight > 0 else 25.0
             else:
                 # TQQQ (기초지수 QQQ, 공포지수 VXN)
@@ -629,7 +629,7 @@ class KoreaInvestmentBroker:
                 ret.metric_val = vxn_val
                 ret.weight = weight
                 ret.base_amp = base_amp
-                ret.metric_name = "프리마켓 VXN"
+                ret.metric_name = "실시간 VXN"
                 ret.metric_base = round(vxn_val / weight, 2) if weight > 0 else 20.0
             
             ret.is_panic = False

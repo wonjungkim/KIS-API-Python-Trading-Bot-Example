@@ -358,19 +358,18 @@ class TelegramView:
                 atr5, atr14 = atr_data.get(t, (0.0, 0.0))
                 target_obj = dynamic_target_data.get(t)
                 
-                # 💡 [V22.16 패치] 가중치에 따른 자율제어 상태 1줄 추가 (괄호 없는 1줄 압축 포맷)
+                # 💡 [V3.2 UI 교정] 가중치 및 타격선 분리 표출 (개행 및 5칸 들여쓰기 적용)
                 if target_obj is not None and hasattr(target_obj, 'metric_val'):
                     m_val = target_obj.metric_val
                     m_name = target_obj.metric_name
                     m_base = float(target_obj.metric_base)
                     weight = target_obj.weight
                     base_amp = abs(target_obj.base_amp)
-                    final_amp = abs(float(target_obj))
                     
-                    msg += f"📊 <b>실시간 동적 변동성 (V3.1 스나이퍼):</b>\n"
+                    msg += f"📊 <b>실시간 동적 변동성 (V3.2 마스터 스위치):</b>\n"
                     msg += f"▫️ ATR5 ({atr5:.1f}%) / ATR14 ({atr14:.1f}%)\n"
-                    msg += f"▫️ {m_name}: {m_val:.2f} / {m_base:.2f}\n"
-                    msg += f"▫️ 타격선: {base_amp:.2f}% x {weight:.2f}배 (-{final_amp:.2f}%)\n"
+                    msg += f"▫️ {m_name}: {m_val:.2f} / {m_base:.2f}\n     (가중치 {weight:.2f}배)\n"
+                    msg += f"▫️ 고정 타격선(1년 ATR): -{base_amp:.2f}%\n"
                     
                     if weight <= 1.0:
                         msg += f"▫️ 자율제어: 🔫하방[ON] / 🛡️상방[OFF]\n\n"
@@ -378,10 +377,10 @@ class TelegramView:
                         msg += f"▫️ 자율제어: 🔫하방[OFF] / 🛡️상방[ON]\n\n"
                 else:
                     base_amp = 8.79 if t == "SOXL" else 4.95
-                    msg += f"📊 <b>실시간 동적 변동성 (V3.1 스나이퍼):</b>\n"
+                    msg += f"📊 <b>실시간 동적 변동성 (V3.2 마스터 스위치):</b>\n"
                     msg += f"▫️ ATR5 ({atr5:.1f}%) / ATR14 ({atr14:.1f}%)\n"
-                    msg += f"▫️ 지표 연산 실패 (기본값 방어 가동 중)\n"
-                    msg += f"▫️ 타격선: {base_amp:.2f}% x 1.00배 (-{base_amp:.2f}%)\n"
+                    msg += f"▫️ 지표 연산 실패\n     (가중치 1.00배 기본값 방어 중)\n"
+                    msg += f"▫️ 고정 타격선(1년 ATR): -{base_amp:.2f}%\n"
                     msg += f"▫️ 자율제어: 🔫하방[ON] / 🛡️상방[OFF]\n\n"
             else:
                 msg += "\n"
