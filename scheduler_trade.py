@@ -179,8 +179,9 @@ async def scheduled_sniper_monitor(context):
                                     rebound_pct = (c_close - tracking_info['lowest_price']) / tracking_info['lowest_price'] * 100 if tracking_info['lowest_price'] > 0 else 0
                                     is_rebounded = rebound_pct >= trigger_pct
                                     
+                                    # 💡 [핵심 수술] 거래량 정배열 초과 필터 철거 및 순수 MA20 돌파 단일 조건 적용
                                     if is_regular_session:
-                                        is_volume_spike = (c_vol > c_vol_ma20) and (c_vol > c_vol_ma10) and (c_vol_ma10 > c_vol_ma20)
+                                        is_volume_spike = (c_vol > c_vol_ma20)
                                     else:
                                         is_volume_spike = True
                                     
@@ -272,7 +273,7 @@ async def scheduled_sniper_monitor(context):
                                                         except: pass
                                                         
                                                         session_str = "🔥 정규장" if is_regular_session else "🌅 프리/애프터마켓"
-                                                        vol_str = f"기관 매수세 확증 (Vol > MA10 > MA20 이중 돌파)" if is_regular_session else "거래량 필터 면제 (정규장 외 세션)"
+                                                        vol_str = f"기관 매수세 확증 (Vol > MA20 돌파)" if is_regular_session else "거래량 필터 면제 (정규장 외 세션)"
                                                         
                                                         msg = f"💥 <b>[{t}] 하방(매수) 스나이퍼 명중! ({session_str})</b>\n"
                                                         msg += f"📉 <b>최저점: ${tracking_info['lowest_price']:.2f}</b>\n"
@@ -593,7 +594,6 @@ async def scheduled_sniper_monitor(context):
             app_data['sniper_timeout_ts'] = now_ts
     except Exception as e:
         logging.error(f"🚨 스나이퍼 모니터 에러: {e}")
-
 async def scheduled_vwap_trade(context):
     if not is_market_open(): return
     

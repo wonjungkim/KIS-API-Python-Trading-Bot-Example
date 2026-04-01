@@ -93,8 +93,7 @@ class InfiniteStrategy:
                     else:
                         exit_target = default_exit
 
-                    if market_type == "REG" and not is_simulation:
-                        self.cfg.set_reverse_state(ticker, True, rev_day, exit_target)
+                    # 💡 [핵심 수술] 멱등성 파괴를 유발하던 상태 강제 저장 로직(self.cfg.set_reverse_state) 전면 소각 완료
         else:
             one_portion_amt = base_portion
 
